@@ -264,6 +264,12 @@ async function generateDaily() {
 
                 try {
                     await runFfmpeg([
+                        // -y: overwrite without prompting. runFfmpeg gives ffmpeg
+                        // no stdin, so without this a regeneration of a date whose
+                        // snippet files already exist silently keeps the OLD audio
+                        // (ffmpeg reads EOF at the overwrite prompt and skips the
+                        // write) while meta.json updates -- new answers, stale audio.
+                        '-y',
                         '-i',
                         masterPath,
                         '-ss',
