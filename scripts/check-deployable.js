@@ -13,6 +13,22 @@
 import { existsSync } from 'fs';
 import path from 'path';
 
+// Local deploys are disabled by default. Production auto-deploys through
+// Cloudflare Workers Builds on push to main, which runs on a clean runner with
+// no dev junctions. A stray `pnpm deploy:prod` from a dev machine can ship
+// uncommitted state, race the CI deploy, or bundle the junctions. Set
+// ALLOW_LOCAL_DEPLOY=1 for an intentional manual deploy (e.g. Workers Builds is
+// down). Workers Builds itself runs `pnpm build` + `wrangler deploy` directly,
+// not this script, so this guard never blocks CI.
+if (!process.env.ALLOW_LOCAL_DEPLOY) {
+    console.error('\nRefusing to deploy locally.\n');
+    console.error('This project auto-deploys via Cloudflare Workers Builds on push to main.');
+    console.error('Push your commit and let the build deploy it.\n');
+    console.error('For an intentional manual deploy, re-run with:');
+    console.error('  ALLOW_LOCAL_DEPLOY=1 pnpm deploy:prod\n');
+    process.exit(1);
+}
+
 const OFFENDERS = ['static/challenges', 'static/assets'];
 
 const found = OFFENDERS.filter((p) => existsSync(path.resolve(p)));

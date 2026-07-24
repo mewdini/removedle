@@ -93,14 +93,28 @@ pnpm dev
 
 ## Deploying
 
-Deployment targets Cloudflare Workers and expects three R2 buckets plus a D1 database. Credentials go in `.env` (see `.env.example`) and, for CI, in the `R2_*` repository secrets.
+Production **auto-deploys via Cloudflare Workers Builds** on every push to `main`. The build runs on a clean runner with no dev junctions, so there is nothing to unlink and no risk of bundling unreleased challenge audio.
+
+Workers Builds settings (configured once in the Cloudflare dashboard):
+
+- **Build command**: `pnpm build`
+- **Deploy command**: `npx wrangler deploy && node scripts/purge-cache.js`
+- **Environment variables**: `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_PURGE_TOKEN` (a token scoped to Zone > Cache Purge). The deploy purges the edge cache so new HTML and assets serve immediately.
+
+D1 migrations are still applied by hand:
 
 ```bash
-pnpm db:migrate:prod   # apply migrations to the remote D1
-pnpm deploy:prod       # build and deploy
+pnpm db:migrate:prod
 ```
 
-> **Unlink the dev asset links before deploying.** `link-assets` puts `out/dailies` under `static/`, everything in `static/` is bundled, and on Workers static assets are served *before* the Worker, so bundled challenge files would bypass the date gate and expose unreleased audio. `scripts/check-deployable.js` blocks the deploy scripts if the links are present.
+**Local deploys are disabled by default** so production only ever comes from CI. For an intentional manual deploy (e.g. Workers Builds is down), unlink the dev junctions, then set the override:
+
+```bash
+cmd /c rmdir static\challenges static\assets   # POSIX: rm static/challenges static/assets
+ALLOW_LOCAL_DEPLOY=1 pnpm deploy:prod
+```
+
+`scripts/check-deployable.js` refuses a local deploy without `ALLOW_LOCAL_DEPLOY=1`, and also if the dev junctions are present (bundled `static/` is served ahead of the Worker and would expose unreleased audio). Re-link the junctions afterwards with `scripts/link-assets.*`.
 
 Two GitHub Actions handle content:
 
