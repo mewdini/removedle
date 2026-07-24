@@ -41,9 +41,7 @@
     <Logo class="text-[3.5rem] text-theme-text sm:text-[5.25rem]" />
     <span class="px-4 text-center">
         <p class="text-lg text-theme-text">A daily Jane Remover song guessing game!</p>
-        <p class="text-sm text-theme-text">
-            by mewdini
-        </p>
+        <p class="text-sm text-theme-text">by mewdini</p>
     </span>
     <div class="flex flex-row items-center gap-2 text-theme-text">
         <span class="flex items-center transition-all hover:scale-105 active:scale-95"
@@ -92,13 +90,14 @@
         <hr class="h-3 w-full max-w-[280px] border-theme-muted sm:max-w-sm" />
         <span class="text-xl font-bold text-theme-text">Credits</span>
         <div class="flex flex-col items-center justify-center">
-            <img src={icon128} alt="removedle icon" class="h-[100px]" />
+            <img src={icon128} alt="removedle icon" class="h-[100px] rounded-xl" />
             <p class="text-theme-text">
-                Icon created by <a
+                Icon sourced from <a
                     class="hover:underline"
                     target="_blank"
-                    href="https://youtube.com/@augeagora">douglas</a
-                >!
+                    href="https://www.nts.live/shows/deadair-transmissions/episodes/deadair-transmissions-15th-august-2025"
+                    >deadAir - Transmissions w/ Jane Remover</a
+                >
             </p>
         </div>
         <p class="text-theme-text">
