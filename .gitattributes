@@ -1,0 +1,16 @@
+# Normalize all text files to LF (the UNIX standard) in the repo and on checkout,
+# on every platform. Overrides a contributor's core.autocrlf so line endings stay
+# consistent regardless of OS.
+* text=auto eol=lf
+
+# Binary assets: never normalize line endings or treat as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.webp binary
+*.opus binary
+*.m4a binary
+*.flac binary
+*.wav binary
+*.mp3 binary

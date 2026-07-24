@@ -176,12 +176,16 @@ async function generateDaily() {
 
             const titleKey = songKey(song.title);
             if (previousTitleKeys.has(titleKey) || selectedTitleKeys.has(titleKey)) {
-                console.log(`  - [${song.title}] Skipping another version of a recent/selected song`);
+                console.log(
+                    `  - [${song.title}] Skipping another version of a recent/selected song`
+                );
                 continue;
             }
 
             if ((albumCounts.get(song.album) || 0) >= MAX_PER_ALBUM) {
-                console.log(`  - [${song.title}] Skipping, already ${MAX_PER_ALBUM} from ${song.album}`);
+                console.log(
+                    `  - [${song.title}] Skipping, already ${MAX_PER_ALBUM} from ${song.album}`
+                );
                 continue;
             }
 

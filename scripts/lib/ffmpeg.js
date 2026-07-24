@@ -32,7 +32,9 @@ export function runFfmpeg(args, options = {}) {
                 return;
             }
 
-            reject(new Error(`ffmpeg exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`));
+            reject(
+                new Error(`ffmpeg exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`)
+            );
         });
     });
 }

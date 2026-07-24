@@ -15,9 +15,7 @@ function contentTypeFor(file: string) {
 
 // meta.json can still change if a day is regenerated; released snippets never do.
 function cacheControlFor(file: string) {
-    return file === 'meta.json'
-        ? 'public, max-age=3600'
-        : 'public, max-age=31536000, immutable';
+    return file === 'meta.json' ? 'public, max-age=3600' : 'public, max-age=31536000, immutable';
 }
 
 export const GET: RequestHandler = async ({ params, platform }) => {

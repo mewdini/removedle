@@ -148,9 +148,7 @@ export async function syncPull(bucket, prefix, localDir, excludePrefix = null) {
 export async function syncPushMissing(localDir, bucket, prefix = '') {
     console.log(`Pushing new files from ${localDir} to s3://${bucket}/${prefix}...`);
 
-    const remote = new Map(
-        (await listObjects(bucket, prefix)).map((obj) => [obj.Key, obj])
-    );
+    const remote = new Map((await listObjects(bucket, prefix)).map((obj) => [obj.Key, obj]));
     const files = await walkFiles(localDir);
 
     let uploaded = 0;
