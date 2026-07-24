@@ -15,6 +15,7 @@ const OUTPUT_BASE_DIR = process.env.OUTPUT_DIR || path.resolve(__dirname, '../ou
 const VOLUME_THRESHOLD = -35;
 const MAX_RETRIES = 5;
 const DEDUPLICATE_DAYS = 5;
+const MAX_PER_ALBUM = 2;
 const TODAY_DATE = new Date().toISOString().split('T')[0];
 
 function createSeededRandom(seed) {
@@ -112,6 +113,20 @@ async function getPreviousSongIds(dateArg) {
     return previousSongsSet;
 }
 
+// Two different recordings of the same song (an album cut and a single, an
+// original and a remix) live under different IDs but should never share a day.
+// Collapse a title to a rough key so those variants compare equal: drop
+// parentheticals, keep only the part before a "+" / "/" split (medleys and
+// alt titles), and strip punctuation. "Cage Girl / Camgirl" and "Cage Girl"
+// both reduce to "cagegirl".
+function songKey(title) {
+    return title
+        .toLowerCase()
+        .replace(/\(.*?\)/g, '')
+        .split(/[+/]/)[0]
+        .replace(/[^a-z0-9]/g, '');
+}
+
 async function generateDaily() {
     try {
         const dateArg = process.argv[2] || TODAY_DATE;
@@ -132,6 +147,21 @@ async function generateDaily() {
         const availableIds = [...songIds];
         const selectedRounds = [];
 
+        // Song-level de-duplication, on top of the exact-ID check above. A song
+        // used in the last few days, or already chosen for today, blocks every
+        // other version of itself from being picked.
+        const previousTitleKeys = new Set(
+            [...previousSongsSet]
+                .map((id) => registry[id]?.title)
+                .filter(Boolean)
+                .map(songKey)
+        );
+        const selectedTitleKeys = new Set();
+
+        // Cap how many rounds can come from one album in a single day, so a day
+        // never leans on a single record (the whole reason the pool was widened).
+        const albumCounts = new Map();
+
         console.log('\nSelecting and Validating Songs...');
 
         while (selectedRounds.length < 5 && availableIds.length > 0) {
@@ -141,6 +171,17 @@ async function generateDaily() {
 
             if (previousSongsSet.has(songId)) {
                 console.log(`  - [${song.title}] Skipping since it was used previously`);
+                continue;
+            }
+
+            const titleKey = songKey(song.title);
+            if (previousTitleKeys.has(titleKey) || selectedTitleKeys.has(titleKey)) {
+                console.log(`  - [${song.title}] Skipping another version of a recent/selected song`);
+                continue;
+            }
+
+            if ((albumCounts.get(song.album) || 0) >= MAX_PER_ALBUM) {
+                console.log(`  - [${song.title}] Skipping, already ${MAX_PER_ALBUM} from ${song.album}`);
                 continue;
             }
 
@@ -191,6 +232,8 @@ async function generateDaily() {
                     song,
                     snippets: validatedSnippets,
                 });
+                selectedTitleKeys.add(titleKey);
+                albumCounts.set(song.album, (albumCounts.get(song.album) || 0) + 1);
                 console.log(`  + Accepted: ${song.title}`);
             } else {
                 console.log(`  ! Rejected: ${song.title} (too quiet after retries)`);
