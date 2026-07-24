@@ -1,27 +1,30 @@
-// Best-effort edge cache purge, run right after a successful deploy.
+// Manual edge cache purge for removedle.org. Run it (`pnpm purge`) when you
+// change content that is already live and cached:
+//   - reissuing a released day's challenge audio (snippets are served
+//     `immutable`, so a stale copy would otherwise persist until its TTL), or
+//   - updating a non-hashed static asset (e.g. static/favicon.png).
 //
-// Cloudflare Workers Builds (and `wrangler deploy`) ship the new Worker but do
-// NOT purge the edge cache, so HTML and other cached responses can serve stale
-// after a deploy. This purges the whole zone. It is wired into both the Workers
-// Builds deploy command and the local `deploy:prod` script.
+// It is deliberately NOT part of the deploy. A normal code deploy never needs a
+// purge: the /_app/immutable/* assets are content-hashed, so a new build gets
+// new filenames and cannot serve stale. Coupling a purge to every deploy just
+// adds a failure surface for no benefit.
 //
-// Requires:
+// Requires (from the environment or .env):
 //   CLOUDFLARE_PURGE_TOKEN  a token scoped to Zone > Cache Purge
 //   CLOUDFLARE_ZONE_ID      the removedle.org zone id
 //
-// Missing creds are treated as "purge not configured" and skipped without
-// failing, so a local build without them still succeeds. If creds ARE present
-// but the purge call fails, that exits non-zero so the build log surfaces it
-// (the deploy already happened; this only flags that the cache was not cleared).
+// Fails loudly (non-zero exit) so a purge you asked for cannot fail unnoticed.
+
+import 'dotenv/config';
 
 const token = process.env.CLOUDFLARE_PURGE_TOKEN;
 const zone = process.env.CLOUDFLARE_ZONE_ID;
 
 if (!token || !zone) {
-    console.warn(
-        'purge-cache: CLOUDFLARE_PURGE_TOKEN / CLOUDFLARE_ZONE_ID not set, skipping edge purge.'
+    console.error(
+        'purge-cache: set CLOUDFLARE_PURGE_TOKEN and CLOUDFLARE_ZONE_ID (see .env.example).'
     );
-    process.exit(0);
+    process.exit(1);
 }
 
 const res = await fetch(`https://api.cloudflare.com/client/v4/zones/${zone}/purge_cache`, {
@@ -38,4 +41,9 @@ if (res.ok && body.success) {
 }
 
 console.error('purge-cache: purge failed:', res.status, JSON.stringify(body.errors || body));
+if (res.status === 401 || res.status === 403) {
+    console.error(
+        'purge-cache: CLOUDFLARE_PURGE_TOKEN needs the Zone > Cache Purge permission for this zone; check CLOUDFLARE_ZONE_ID too.'
+    );
+}
 process.exit(1);

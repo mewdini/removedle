@@ -98,8 +98,9 @@ Production **auto-deploys via Cloudflare Workers Builds** on every push to `main
 Workers Builds settings (configured once in the Cloudflare dashboard):
 
 - **Build command**: `pnpm build`
-- **Deploy command**: `npx wrangler deploy && node scripts/purge-cache.js`
-- **Environment variables**: `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_PURGE_TOKEN` (a token scoped to Zone > Cache Purge). The deploy purges the edge cache so new HTML and assets serve immediately.
+- **Deploy command**: `npx wrangler deploy`
+
+A deploy does not purge the edge cache, and does not need to: the `/_app/immutable/*` assets are content-hashed, so a new build cannot serve stale code. Purge only when you change content that is already live and cached (reissuing a released day's challenge audio, or a static asset), with `pnpm purge`, which needs `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_PURGE_TOKEN` (Zone > Cache Purge) in `.env`.
 
 D1 migrations are still applied by hand:
 
