@@ -160,6 +160,8 @@
             <input
                 class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-theme-accent accent-theme-text"
                 type="range"
+                name="volume"
+                aria-label="Volume"
                 min="1"
                 max="100"
                 value={inputVolume}

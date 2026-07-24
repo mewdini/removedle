@@ -92,6 +92,8 @@
             <input
                 class="text-md my-1 w-full min-w-0 border-none bg-transparent px-2 text-theme-text outline-none focus:ring-0"
                 type="text"
+                name="guess"
+                aria-label="Guess the song"
                 autocomplete="off"
                 placeholder={isCurrentGuess() ? 'Guess the song...' : ''}
                 disabled={!isCurrentGuess() || (result && result !== 'playing')}

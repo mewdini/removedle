@@ -8,14 +8,14 @@
 
     import '@fontsource/poppins';
     import Header from '$lib/components/Header.svelte';
-    import { ASSETS_URL, DESCRIPTION, NAME, SITE } from '$lib/statics.js';
+    import { DESCRIPTION, NAME, SITE } from '$lib/statics.js';
     import { onMount } from 'svelte';
     import { setSettingsContext } from '$lib/settings.svelte';
     import { themes } from '$lib/themes';
 
     import type { AppSettings } from '$lib/interfaces';
 
-    let { children, data } = $props();
+    let { children } = $props();
     let settings: AppSettings = $state({
         volume: 10,
         theme: 'dark',
@@ -99,12 +99,6 @@
     <link rel="apple-touch-icon" sizes="180x180" href={favicon180} />
     <link rel="icon" type="image/png" sizes="192x192" href={favicon192} />
     <link rel="icon" type="image/png" sizes="512x512" href={favicon512} />
-
-    {#if data.albums && data.albums.length > 0}
-        {#each data.albums as album (album.file)}
-            <link rel="preload" as="image" href="{ASSETS_URL}/art/{album.file}" type="image/webp" />
-        {/each}
-    {/if}
 </svelte:head>
 
 <div class="m-auto flex w-full max-w-[800px] flex-col items-center p-2 align-middle">
