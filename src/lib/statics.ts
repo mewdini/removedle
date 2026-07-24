@@ -2,7 +2,9 @@ import { dev } from '$app/environment';
 
 const MAX_ROUNDS = 5;
 const GUESSES_PER_ROUND = 3;
-const START_DATE_STRING = '2026-07-23';
+// Day 1. The site went live on this date; earlier dates were test data and are
+// rejected by the date routes rather than merely hidden from the archive.
+const START_DATE_STRING = '2026-07-24';
 const ASSETS_URL = dev ? '/assets' : 'https://assets.removedle.org';
 // Always same-origin: challenge media is served by src/routes/challenges/[date]/[file],
 // which gates future dates. It must never point at a public bucket, as that would

@@ -1,5 +1,11 @@
 import type { DailyMeta, Song } from '$lib/interfaces';
-import { ASSETS_URL, CHALLENGES_URL, GUESSES_PER_ROUND, MAX_ROUNDS } from '$lib/statics';
+import {
+    ASSETS_URL,
+    CHALLENGES_URL,
+    GUESSES_PER_ROUND,
+    MAX_ROUNDS,
+    START_DATE_STRING,
+} from '$lib/statics';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { challengeStats } from './db/schema';
 import { eq, sql } from 'drizzle-orm';
@@ -33,6 +39,19 @@ export function isFutureChallengeDate(value: string): boolean {
     const candidate = new Date(Date.UTC(year, month - 1, day));
 
     return candidate.getTime() > todayUtc.getTime();
+}
+
+// Dates before day 1 are not part of the game. Without this they are merely
+// absent from the archive listing but still reachable by URL, and loading one
+// lazily inserts an empty challengeStats row via getGlobalData.
+export function isBeforeFirstChallengeDate(value: string): boolean {
+    const [year, month, day] = value.split('-').map(Number);
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+
+    const [sy, sm, sd] = START_DATE_STRING.split('-').map(Number);
+    const start = new Date(Date.UTC(sy, sm - 1, sd));
+
+    return candidate.getTime() < start.getTime();
 }
 
 export async function loadChallengeByDate(
@@ -84,7 +103,12 @@ export async function updateGlobalData(
     date: string,
     points: number
 ) {
-    if (isFutureChallengeDate(date) || points < 0 || points > MAX_ROUNDS * GUESSES_PER_ROUND) {
+    if (
+        isFutureChallengeDate(date) ||
+        isBeforeFirstChallengeDate(date) ||
+        points < 0 ||
+        points > MAX_ROUNDS * GUESSES_PER_ROUND
+    ) {
         return { success: false };
     }
 

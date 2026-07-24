@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import {
     getGlobalData,
+    isBeforeFirstChallengeDate,
     isFutureChallengeDate,
     loadChallengeByDate,
     updateGlobalData,
@@ -14,7 +15,7 @@ import * as schema from '$lib/server/db/schema';
 export const load: PageServerLoad = async ({ params, fetch, platform }) => {
     const date = params.date;
 
-    if (isFutureChallengeDate(date)) {
+    if (isFutureChallengeDate(date) || isBeforeFirstChallengeDate(date)) {
         throw error(404, 'Challenge not found');
     }
 

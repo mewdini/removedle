@@ -35,7 +35,10 @@
 </script>
 
 <div class="flex w-full flex-col items-center justify-center gap-2 pt-4 align-middle">
-    <Logo class="h-10 w-auto text-theme-text sm:h-15" />
+    <!-- Sized to match the outlined wordmark it replaced: that SVG rendered at
+         h-10 / sm:h-15, so its glyphs were 40px and 60px tall. Poppins caps are
+         roughly 0.72em, hence 56px / 84px here. -->
+    <Logo class="text-[3.5rem] text-theme-text sm:text-[5.25rem]" />
     <span class="px-4 text-center">
         <p class="text-lg text-theme-text">A daily Jane Remover song guessing game!</p>
         <p class="text-sm text-theme-text">
@@ -89,7 +92,7 @@
         <hr class="h-3 w-full max-w-[280px] border-theme-muted sm:max-w-sm" />
         <span class="text-xl font-bold text-theme-text">Credits</span>
         <div class="flex flex-col items-center justify-center">
-            <img src={icon128} alt="underscordle icon" class="h-[100px]" />
+            <img src={icon128} alt="removedle icon" class="h-[100px]" />
             <p class="text-theme-text">
                 Icon created by <a
                     class="hover:underline"
@@ -99,12 +102,19 @@
             </p>
         </div>
         <p class="text-theme-text">
-            <b>removedle</b> is heavily inspired by
-            <a class="hover:underline" target="_blank" href="https://twitch.tv/ottomated"
-                >Ottomated</a
-            >'s
-            <a class="hover:underline" target="_blank" href="https://porterrobinsle.com/"
-                ><i>PORTER ROBINSONLE</i></a
+            <b>removedle</b> is a fork of
+            <a
+                class="hover:underline"
+                target="_blank"
+                rel="noopener noreferrer"
+                href="https://github.com/angelolz/underscordle"><i>underscordle</i></a
+            >
+            by
+            <a
+                class="hover:underline"
+                target="_blank"
+                rel="noopener noreferrer"
+                href="https://github.com/angelolz">angelolz</a
             >.
         </p>
     </div>
