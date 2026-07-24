@@ -22,9 +22,6 @@ jobs:
             - name: Install dependencies
               run: pnpm install
 
-            - name: Install ffmpeg
-              run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
             - name: Set up cache
               uses: actions/cache@v5
               with:

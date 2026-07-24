@@ -45,9 +45,6 @@ jobs:
             - name: Install dependencies
               run: pnpm install
 
-            - name: Install ffmpeg
-              run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
             - name: Restore cache
               id: cache-restore
               uses: actions/cache@v5
