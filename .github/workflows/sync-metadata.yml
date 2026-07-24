@@ -5,7 +5,7 @@ on:
 
 jobs:
     sync:
-        if: github.repository == 'angelolz/underscordle' && github.actor == 'angelolz'
+        if: github.repository == 'mewdini/removedle' && github.actor == 'mewdini'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -32,8 +32,8 @@ jobs:
                       out/data
                       out/masters
                       out/covers
-                  key: underscordle-cache-${{ github.run_id }}
-                  restore-keys: underscordle-cache-
+                  key: removedle-cache-${{ github.run_id }}
+                  restore-keys: removedle-cache-
 
             - name: Pull Masters from R2
               run: node scripts/sync-r2.js pull-masters

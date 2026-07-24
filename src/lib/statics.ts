@@ -2,10 +2,12 @@ import { dev } from '$app/environment';
 
 const MAX_ROUNDS = 5;
 const GUESSES_PER_ROUND = 3;
-const ANGELOLZ_SITE = 'https://angelolz.one';
-const START_DATE_STRING = '2026-04-21';
-const ASSETS_URL = dev ? '/assets' : 'https://assets.underscordle.org';
-const CHALLENGES_URL = dev ? '/challenges' : 'https://challenges.underscordle.org';
+const START_DATE_STRING = '2026-07-23';
+const ASSETS_URL = dev ? '/assets' : 'https://assets.removedle.org';
+// Always same-origin: challenge media is served by src/routes/challenges/[date]/[file],
+// which gates future dates. It must never point at a public bucket, as that would
+// expose tomorrow's answers, which are uploaded the evening before.
+const CHALLENGES_URL = '/challenges';
 const ERROR_LINES = [
     //seen when hitting a 404 page
     "Stop me if you've heard this one before...",
@@ -22,15 +24,14 @@ const ERROR_LINES = [
     "It's not the end of the world!",
     "Oh dear, that's rather alarming...",
 ];
-const NAME = 'underscordle';
+const NAME = 'removedle';
 const DESCRIPTION =
-    'A daily underscores song guessing game featuring five songs and three guesses per track. How many can you get right?';
-const SITE = 'https://underscordle.org';
+    'A daily Jane Remover song guessing game featuring five songs and three guesses per track. How many can you get right?';
+const SITE = 'https://removedle.org';
 
 export {
     MAX_ROUNDS,
     GUESSES_PER_ROUND,
-    ANGELOLZ_SITE,
     START_DATE_STRING,
     ASSETS_URL,
     CHALLENGES_URL,

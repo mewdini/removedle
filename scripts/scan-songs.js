@@ -3,8 +3,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import ffmpeg from 'fluent-ffmpeg';
 import { encode } from '@msgpack/msgpack';
+import { runFfmpeg } from './lib/ffmpeg.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,22 +42,23 @@ async function extractArt(songPath, albumName, metadata) {
             const tempInput = path.join(path.dirname(outputPath), `temp-${slug}${imgExt}`);
             await fs.writeFile(tempInput, picture.data);
 
-            return new Promise((resolve) => {
-                ffmpeg(tempInput)
-                    .output(outputPath)
-                    .frames(1)
-                    .size('80x80')
-                    .on('end', async () => {
-                        await fs.unlink(tempInput).catch(() => {});
-                        resolve(`/art/${slug}.webp`);
-                    })
-                    .on('error', async (err) => {
-                        console.warn(`  Could not convert art for ${albumName}: ${err.message}`);
-                        await fs.unlink(tempInput).catch(() => {});
-                        resolve(null);
-                    })
-                    .run();
-            });
+            try {
+                await runFfmpeg([
+                    '-i',
+                    tempInput,
+                    '-frames:v',
+                    '1',
+                    '-vf',
+                    'scale=80:80',
+                    outputPath,
+                ]);
+                await fs.unlink(tempInput).catch(() => {});
+                return `/art/${slug}.webp`;
+            } catch (err) {
+                console.warn(`  Could not convert art for ${albumName}: ${err.message}`);
+                await fs.unlink(tempInput).catch(() => {});
+                return null;
+            }
         }
 
         console.log(`  No embedded cover art found for ${albumName}.`);

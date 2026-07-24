@@ -80,7 +80,7 @@
             gameState.hasSaved = false;
 
             //get stats
-            const savedStats = localStorage.getItem('underscordle-stats');
+            const savedStats = localStorage.getItem('removedle-stats');
             if (savedStats) {
                 try {
                     const statsParsed = JSON.parse(savedStats);
@@ -116,7 +116,7 @@
             }
 
             //get save data for current date
-            const savedGameData = localStorage.getItem(`underscordle-${date}`);
+            const savedGameData = localStorage.getItem(`removedle-${date}`);
             if (savedGameData) {
                 try {
                     const parsed = JSON.parse(savedGameData);
@@ -161,7 +161,7 @@
     $effect(() => {
         const stateToSave = JSON.stringify(gameState);
         if (!loading && date) {
-            localStorage.setItem(`underscordle-${date}`, stateToSave);
+            localStorage.setItem(`removedle-${date}`, stateToSave);
         }
     });
 
@@ -169,7 +169,7 @@
     $effect(() => {
         const statsToSave = JSON.stringify(stats);
         if (!loading) {
-            localStorage.setItem('underscordle-stats', statsToSave);
+            localStorage.setItem('removedle-stats', statsToSave);
         }
     });
 
@@ -311,7 +311,7 @@
     <div
         class="flex flex-col items-center justify-center gap-4 p-10 text-center align-middle text-white"
     >
-        <p>No challenge found for this date. Please let Angel know about this!</p>
+        <p>No challenge found for this date. Please let mewdini know about this!</p>
         <a
             class="flex flex-row items-center gap-1 text-sm hover:underline"
             href={resolve('/archive')}

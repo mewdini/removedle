@@ -37,13 +37,9 @@
 <div class="flex w-full flex-col items-center justify-center gap-2 pt-4 align-middle">
     <Logo class="h-10 w-auto text-theme-text sm:h-15" />
     <span class="px-4 text-center">
-        <p class="text-lg text-theme-text">A daily underscores song guessing game!</p>
+        <p class="text-lg text-theme-text">A daily Jane Remover song guessing game!</p>
         <p class="text-sm text-theme-text">
-            by <a
-                class="hover:text-theme-accent hover:underline"
-                target="_blank"
-                href="https://angelolz.one">angelolz</a
-            >
+            by mewdini
         </p>
     </span>
     <div class="flex flex-row items-center gap-2 text-theme-text">
@@ -65,7 +61,7 @@
             ></span
         >
         <span class="flex items-center transition-all hover:scale-105 active:scale-95"
-            ><a href="https://github.com/angelolz/underscordle" target="_blank" rel="noreferrer"
+            ><a href="https://github.com/mewdini/removedle" target="_blank" rel="noreferrer"
                 ><GithubSolid class="h-8 w-8 shrink-0" /></a
             ></span
         >
@@ -103,7 +99,7 @@
             </p>
         </div>
         <p class="text-theme-text">
-            <b>underscordle</b> is heavily inspired by
+            <b>removedle</b> is heavily inspired by
             <a class="hover:underline" target="_blank" href="https://twitch.tv/ottomated"
                 >Ottomated</a
             >'s

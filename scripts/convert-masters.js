@@ -1,6 +1,6 @@
-import ffmpeg from 'fluent-ffmpeg';
 import { existsSync, mkdirSync, readdirSync } from 'fs';
 import { join, parse, resolve } from 'path';
+import { runFfmpeg } from './lib/ffmpeg.js';
 
 const MASTERS_DIR = resolve('masters');
 const OUTPUT_DIR = resolve('out', 'masters');
@@ -22,27 +22,31 @@ async function convertFile(file) {
     const inputPath = join(MASTERS_DIR, file);
     const outputPath = join(OUTPUT_DIR, `${name}.m4a`);
 
-    return new Promise((resolvePromise, reject) => {
-        ffmpeg(inputPath)
-            .outputOptions('-map', '0:a') // map audio
-            .outputOptions('-map', '0:v?') // map video/art if it exists
-            .outputOptions('-c:v', 'copy') // copy the image without re-encoding
-            .audioCodec('aac')
-            .audioBitrate('192k')
-            .outputOptions('-movflags', 'faststart')
-            .on('start', () => {
-                console.log(`Converting: ${file}`);
-            })
-            .on('error', (err, _, __) => {
-                console.error(`Failed to convert ${file}:`, err.message);
-                reject(err);
-            })
-            .on('end', () => {
-                console.log(`Finished: ${name}.m4a`);
-                resolvePromise();
-            })
-            .save(outputPath);
-    });
+    console.log(`Converting: ${file}`);
+
+    try {
+        await runFfmpeg([
+            '-i',
+            inputPath,
+            '-map',
+            '0:a',
+            '-map',
+            '0:v?',
+            '-c:v',
+            'copy',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '192k',
+            '-movflags',
+            'faststart',
+            outputPath,
+        ]);
+        console.log(`Finished: ${name}.m4a`);
+    } catch (err) {
+        console.error(`Failed to convert ${file}:`, err.message);
+        throw err;
+    }
 }
 
 async function run() {

@@ -11,7 +11,7 @@
 
     onMount(() => {
         for (const entry of data.archiveEntries as ArchiveEntry[]) {
-            const saved = localStorage.getItem(`underscordle-${entry.date}`);
+            const saved = localStorage.getItem(`removedle-${entry.date}`);
             if (!saved) continue;
 
             try {

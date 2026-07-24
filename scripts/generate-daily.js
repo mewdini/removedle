@@ -1,8 +1,9 @@
-import ffmpeg from 'fluent-ffmpeg';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { runFfmpeg } from './lib/ffmpeg.js';
+import { BUCKETS, readObject } from './lib/r2.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +12,6 @@ const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../out/data');
 const REGISTRY_FILE = path.join(DATA_DIR, 'song-registry.json');
 const MASTERS_DIR = process.env.MASTERS_DIR || path.resolve(__dirname, '../out/masters');
 const OUTPUT_BASE_DIR = process.env.OUTPUT_DIR || path.resolve(__dirname, '../out/dailies');
-const BUCKET_URL = 'https://challenges.underscordle.org';
 const VOLUME_THRESHOLD = -35;
 const MAX_RETRIES = 5;
 const DEDUPLICATE_DAYS = 5;
@@ -33,37 +33,52 @@ function createSeededRandom(seed) {
 }
 
 async function getMeanVolume(masterPath, startTime, duration) {
-    return new Promise((resolve) => {
-        let meanVolume = -100;
-        ffmpeg(masterPath)
-            .setStartTime(startTime)
-            .setDuration(duration)
-            .audioFilters('volumedetect')
-            .addOption('-f', 'null')
-            .output('-')
-            .on('stderr', (line) => {
-                const match = line.match(/mean_volume: ([-\d.]+) dB/);
-                if (match) {
-                    meanVolume = parseFloat(match[1]);
-                }
-            })
-            .on('end', () => {
-                resolve(meanVolume);
-            })
-            .on('error', (err) => {
-                console.error(`    Volume detection error: ${err.message}`);
-                resolve(-100);
-            })
-            .run();
-    });
+    let volume = -100;
+
+    try {
+        await runFfmpeg(
+            [
+                '-i',
+                masterPath,
+                '-ss',
+                startTime.toString(),
+                '-t',
+                duration.toString(),
+                '-af',
+                'volumedetect',
+                '-vn',
+                '-f',
+                'null',
+                '-',
+            ],
+            {
+                onStderr: (line) => {
+                    const match = line.match(/mean_volume: ([-\d.]+) dB/);
+                    if (match) {
+                        volume = parseFloat(match[1]);
+                    }
+                },
+            }
+        );
+        return volume;
+    } catch (err) {
+        console.error(`    Volume detection error: ${err.message}`);
+        return -100;
+    }
 }
 
+// All date arithmetic here is UTC, matching the rest of the app (challenge dates
+// are UTC days). Using the local-time accessors instead is correct for fixed
+// offsets but silently wrong across a DST transition: the changing offset shifts
+// the computed instant by an hour, which can step over a UTC midnight. On a
+// machine in a DST-observing zone, generating 2026-11-03 skipped 2026-11-01 and
+// reached back to 2026-10-28, checking the wrong five days for repeats.
 function getPreviousDays(dateArg) {
     const dates = [];
 
     for (let i = 1; i <= DEDUPLICATE_DAYS; i++) {
-        const oldDate = new Date(dateArg);
-        oldDate.setDate(oldDate.getDate() - i);
+        const oldDate = new Date(`${dateArg}T00:00:00Z`);
+        oldDate.setUTCDate(oldDate.getUTCDate() - i);
         dates.push(oldDate.toISOString().split('T')[0]);
     }
 
@@ -74,23 +89,23 @@ async function getPreviousSongIds(dateArg) {
     const previousSongsSet = new Set();
     const previousDates = getPreviousDays(dateArg);
 
+    // Read via the S3 API, not over HTTP: the challenges bucket is private (it
+    // holds unreleased days), so there is no public URL to fetch. Errors are NOT
+    // swallowed here: a silent failure would return an empty set and quietly
+    // disable de-duplication, producing a challenge that repeats recent songs.
     await Promise.all(
         previousDates.map(async (date) => {
-            try {
-                const metaResponse = await fetch(`${BUCKET_URL}/${date}/meta.json`);
-                if (!metaResponse.ok) {
-                    console.log(`   Failed to get meta.json for ${date}, response not ok`);
-                    return;
-                }
+            const raw = await readObject(BUCKETS.challenges, `${date}/meta.json`);
 
-                const metaResult = await metaResponse.json();
-
-                metaResult.rounds?.forEach((round) => {
-                    previousSongsSet.add(round.songId);
-                });
-            } catch (e) {
-                console.log(`   Failed to get meta.json for ${date}, ${e.message}`);
+            if (raw === null) {
+                console.log(`   No challenge stored for ${date}, skipping`);
+                return;
             }
+
+            const metaResult = JSON.parse(raw);
+            metaResult.rounds?.forEach((round) => {
+                previousSongsSet.add(round.songId);
+            });
         })
     );
 
@@ -204,20 +219,24 @@ async function generateDaily() {
                 const outputName = `round-${round}-guess-${snip.id}.opus`;
                 const outputPath = path.join(dayDir, outputName);
 
-                await new Promise((resolve, reject) => {
-                    ffmpeg(masterPath)
-                        .setStartTime(snip.startTime)
-                        .setDuration(snip.duration)
-                        .output(outputPath)
-                        .audioCodec('libopus')
-                        .outputFormat('opus')
-                        .on('end', resolve)
-                        .on('error', (err) => {
-                            console.error(`Error processing snippet ${outputName}:`, err);
-                            reject(err);
-                        })
-                        .run();
-                });
+                try {
+                    await runFfmpeg([
+                        '-i',
+                        masterPath,
+                        '-ss',
+                        snip.startTime.toString(),
+                        '-t',
+                        snip.duration.toString(),
+                        '-c:a',
+                        'libopus',
+                        '-f',
+                        'opus',
+                        outputPath,
+                    ]);
+                } catch (err) {
+                    console.error(`Error processing snippet ${outputName}:`, err);
+                    throw err;
+                }
                 console.log(`  - Generated: ${outputName} (Start: ${snip.startTime.toFixed(2)}s)`);
             }
 

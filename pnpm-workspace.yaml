@@ -1,4 +1,17 @@
 allowBuilds:
-    esbuild: true
-    sharp: true
-    workerd: true
+  esbuild: true
+  ffmpeg-static: true
+  sharp: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - esbuild@0.24.3
+  - cookie@0.7.0
+  - sharp@0.35.0
+# Force patched versions of vulnerable transitive dependencies.
+# - esbuild <=0.24.2 (GHSA-67mh-4wv8-2f99): pulled in via drizzle-kit > @esbuild-kit
+# - cookie <0.7.0 (GHSA-pxg6-pf52-xh8x): pulled in via @sveltejs/kit
+# - sharp <0.35.0 (GHSA-f88m-g3jw-g9cj): pulled in via wrangler > miniflare
+overrides:
+  esbuild@<0.24.3: ^0.25.0
+  cookie@<0.7.0: ^0.7.2
+  sharp@<0.35.0: ^0.35.0

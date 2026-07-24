@@ -20,7 +20,7 @@ on:
 
 jobs:
     generate:
-        if: github.repository == 'angelolz/underscordle' && (github.event_name == 'schedule' || github.actor == 'angelolz')
+        if: github.repository == 'mewdini/removedle' && (github.event_name == 'schedule' || github.actor == 'mewdini')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -48,8 +48,8 @@ jobs:
                       out/data
                       out/masters
                       out/covers
-                  key: underscordle-cache-${{ github.run_id }}
-                  restore-keys: underscordle-cache-
+                  key: removedle-cache-${{ github.run_id }}
+                  restore-keys: removedle-cache-
 
             - name: Pull Masters & Data from R2
               if: steps.cache-restore.outputs.cache-matched-key == ''
@@ -86,6 +86,13 @@ jobs:
                   MASTERS_DIR: ./out/masters
                   DATA_DIR: ./out/data
                   OUTPUT_DIR: ./out/dailies
+                  # Needed since the challenges bucket went private: the generator
+                  # reads the previous days' meta.json over the S3 API to avoid
+                  # repeating songs. Without these it throws instead of silently
+                  # producing a challenge with no de-duplication.
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
             - name: Push Snippets to R2
               run: node scripts/sync-r2.js push-challenges

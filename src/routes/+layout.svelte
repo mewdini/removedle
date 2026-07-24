@@ -24,7 +24,7 @@
     setSettingsContext(settings);
 
     onMount(() => {
-        const settingsJson = localStorage.getItem(`underscordle-settings`);
+        const settingsJson = localStorage.getItem(`removedle-settings`);
         if (settingsJson) {
             try {
                 const parsed = JSON.parse(settingsJson);
@@ -71,7 +71,7 @@
     // save everytime theres a change to settings
     function saveSettings() {
         const stateToSave = JSON.stringify(settings);
-        localStorage.setItem(`underscordle-settings`, stateToSave);
+        localStorage.setItem(`removedle-settings`, stateToSave);
     }
 </script>
 

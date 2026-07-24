@@ -1,13 +1,7 @@
-import { syncPull, syncPush } from './lib/r2.js';
+import { BUCKETS, syncPull, syncPush, syncPushMissing } from './lib/r2.js';
 import path from 'path';
 
 const command = process.argv[2];
-
-const BUCKETS = {
-    masters: 'underscordle-music-list',
-    data: 'underscordle-data',
-    challenges: 'underscordle-challenges',
-};
 
 const DIRS = {
     masters: path.resolve('out/masters'),
@@ -31,6 +25,12 @@ async function main() {
                 await syncPull(BUCKETS.data, 'art/', DIRS.art);
                 break;
 
+            // Skips anything already in the bucket, since out/masters holds the
+            // whole back catalogue, not just newly added songs.
+            case 'push-masters':
+                await syncPushMissing(DIRS.masters, BUCKETS.masters, '');
+                break;
+
             case 'push-data':
                 await syncPush(DIRS.data, BUCKETS.data, '');
                 await syncPush(DIRS.art, BUCKETS.data, 'art');
@@ -42,7 +42,7 @@ async function main() {
 
             default:
                 console.log(
-                    'Usage: node scripts/sync-r2.js [pull-masters|pull-data|pull-art|push-data|push-challenges]'
+                    'Usage: node scripts/sync-r2.js [pull-masters|pull-data|pull-art|push-masters|push-data|push-challenges]'
                 );
                 process.exit(1);
         }
