@@ -10,21 +10,25 @@ const ASSETS_URL = dev ? '/assets' : 'https://assets.removedle.org';
 // which gates future dates. It must never point at a public bucket, as that would
 // expose tomorrow's answers, which are uploaded the evening before.
 const CHALLENGES_URL = '/challenges';
-const ERROR_LINES = [
-    //seen when hitting a 404 page
-    "Stop me if you've heard this one before...",
-    'Bozo, bozo, bozo...',
-    'Stupid, stupid, stupid...',
-    "Quite the mistake you've made...",
-    "I'm going to assume something, is that fine?",
-    'I never expected this...',
-    'Slow down, slow down...',
-    'What you tryna do?',
-    "I got a problem and it's not my fault...",
-    'You must be kidding me!',
-    'Happens all the time...',
-    "It's not the end of the world!",
-    "Oh dear, that's rather alarming...",
+// Shown when hitting a 404 page; pulled from the lyric metadata on the masters in
+// masters/. `song` must match a catalog title exactly so the error page can resolve
+// its streaming links for the hover reveal.
+const ERROR_LINES: { line: string; song: string }[] = [
+    { line: "I guess you weren't meant for my hideout...", song: 'misplace' },
+    { line: "That's not the plan...", song: 'search party' },
+    { line: "Well, that's your loss...", song: 'movies for guys' },
+    { line: 'Good luck trying to catch me...', song: 'Backseat Girl' },
+    { line: 'You got lost chasing time again...', song: 'kodak moment' },
+    { line: 'As if it ever was that easy?', song: 'Backseat Girl' },
+    { line: 'Look at the mess...', song: 'movies for guys' },
+    { line: 'Stay out of my business...', song: 'homeswitcher' },
+    { line: 'Somebody save me now...', song: 'let’s go home' },
+    { line: "I'm not sure where to go...", song: 'search party' },
+    { line: 'Oh, my heart is broken!', song: 'movies for guys' },
+    { line: "You won't stay ahead of me forever...", song: 'Cage Girl / Camgirl' },
+    { line: 'Is it too much to say I want it back?', song: 'buzzcut, daisy' },
+    { line: 'Good luck tryna fix me...', song: 'JRJRJR' },
+    { line: "It's all your fault...", song: 'kodak moment' },
 ];
 const NAME = 'removedle';
 const DESCRIPTION =
