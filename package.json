@@ -12,6 +12,7 @@
         "deploy:prod": "node scripts/check-deployable.js && pnpm build && wrangler deploy",
         "purge": "node scripts/purge-cache.js",
         "links": "node scripts/resolve-links.js",
+        "links:issues": "node scripts/link-issues.js",
         "db:generate": "drizzle-kit generate",
         "db:migrate:local": "wrangler d1 migrations apply DB --local",
         "db:migrate:prod": "wrangler d1 migrations apply DB --remote",

@@ -13,6 +13,10 @@ jobs:
     verify:
         if: github.repository == 'mewdini/removedle' && (github.event_name == 'schedule' || github.actor == 'mewdini')
         runs-on: ubuntu-latest
+        # Needed to file/update the rolling link-health issue below.
+        permissions:
+            contents: read
+            issues: write
         steps:
             - uses: actions/checkout@v4
 
@@ -55,3 +59,66 @@ jobs:
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Machine-readable snapshot of what still needs a human, from the
+            # registry this run just wrote (persistent deadLinks, not the per-run
+            # link-issues.json).
+            - name: Build link-health report
+              run: node scripts/link-issues.js --json > link-issues-report.json
+              env:
+                  DATA_DIR: ./out/data
+
+            # Maintain ONE rolling "link-health" issue: update it while anything is
+            # hidden/missing, auto-close it when everything is healthy again. No
+            # per-link spam, and no extra secret -- the default GITHUB_TOKEN suffices.
+            - name: File link-health issue
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const { dead, empty } = JSON.parse(fs.readFileSync('link-issues-report.json', 'utf8'));
+                      const LABEL = 'link-health';
+                      const TITLE = 'Streaming links needing attention';
+
+                      const open = (await github.rest.issues.listForRepo({
+                          ...context.repo, labels: LABEL, state: 'open',
+                      })).data[0];
+
+                      if (!dead.length && !empty.length) {
+                          if (open) {
+                              await github.rest.issues.createComment({
+                                  ...context.repo, issue_number: open.number,
+                                  body: 'All streaming links healthy again — closing.',
+                              });
+                              await github.rest.issues.update({
+                                  ...context.repo, issue_number: open.number, state: 'closed',
+                              });
+                          }
+                          return;
+                      }
+
+                      let body = 'Maintained automatically by `verify-links.yml` (rewritten each run).\n\n';
+                      if (dead.length) {
+                          body += `## Dead links hidden from players (${dead.length})\n\n`;
+                          body += '| Song | Platform | URL | Dead since |\n|---|---|---|---|\n';
+                          for (const d of dead) body += `| ${d.title} | ${d.platform} | ${d.url} | ${d.since} |\n`;
+                          body += '\n';
+                      }
+                      if (empty.length) {
+                          body += `## Songs with no links at all (${empty.length})\n\n`;
+                          for (const e of empty) body += `- ${e.title} (\`${e.id}\`)\n`;
+                          body += '\n';
+                      }
+                      body += 'Recover with a local `pnpm links` (full scrapers), or hand-add the URL to the song in the registry, then `pnpm scan` + push-data.';
+
+                      try {
+                          await github.rest.issues.getLabel({ ...context.repo, name: LABEL });
+                      } catch {
+                          await github.rest.issues.createLabel({ ...context.repo, name: LABEL, color: 'd73a4a' });
+                      }
+
+                      if (open) {
+                          await github.rest.issues.update({ ...context.repo, issue_number: open.number, title: TITLE, body });
+                      } else {
+                          await github.rest.issues.create({ ...context.repo, title: TITLE, body, labels: [LABEL] });
+                      }
