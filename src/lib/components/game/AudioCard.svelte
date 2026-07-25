@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { ChevronDoubleRightOutline, PlaySolid } from 'flowbite-svelte-icons';
+    import { ChevronDoubleRightOutline, PauseSolid, PlaySolid } from 'flowbite-svelte-icons';
     import SearchResults from './SearchResults.svelte';
     import type { Song } from '$lib/interfaces';
 
@@ -7,6 +7,10 @@
     let searchTerm = $state('');
     let suggestionIndex = $state(0);
     let results: Song[] = $state([]);
+    let playing = $derived(player.isPlaying(src));
+    let iconClass = $derived(
+        `h-[42px] w-[42px] ${isActive || result !== 'playing' ? 'transition-all hover:scale-110 active:scale-95' : ''}`
+    );
 
     $effect(() => {
         // only run searcher if current guess and search is non-empty
@@ -40,7 +44,11 @@
 
     function playClue() {
         if (guesses.length >= guessIndex || result !== 'playing') {
-            player.play(src);
+            if (playing) {
+                player.stop();
+            } else {
+                player.play(src);
+            }
         }
     }
 
@@ -79,9 +87,11 @@
 >
     <span class="flex w-full flex-row items-center gap-2 px-2">
         <button onclick={playClue} class="shrink-0 text-theme-text">
-            <PlaySolid
-                class={`h-[42px] w-[42px] ${isActive || result !== 'playing' ? 'transition-all hover:scale-110 active:scale-95' : ''}`}
-            />
+            {#if playing}
+                <PauseSolid class={iconClass} />
+            {:else}
+                <PlaySolid class={iconClass} />
+            {/if}
         </button>
         <div
             class="relative flex min-w-0 flex-1 flex-row rounded-3xl border border-theme-text focus-within:ring-2 focus-within:ring-theme-accent"

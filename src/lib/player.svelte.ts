@@ -5,11 +5,15 @@ export type SharedSnippetPlayer = {
     stop(): void;
     setVolume(volume: number): void;
     getCurrentSrc(): string | null;
+    isPlaying(src: string): boolean;
 };
 
 export function createSharedSnippetPlayer(): SharedSnippetPlayer {
     let audio: HTMLAudioElement | null = null;
     let currentSrc: string | null = null;
+    // Which snippet is actively playing, or null. Reactive ($state) so each
+    // AudioCard's play/pause icon follows it; cleared when playback ends or stops.
+    let playingSrc = $state<string | null>(null);
 
     function getClampedVolume(volume: number) {
         return Math.min(Math.max(volume / 100, 0), 1);
@@ -20,6 +24,15 @@ export function createSharedSnippetPlayer(): SharedSnippetPlayer {
 
         audio = new Audio();
         audio.preload = 'none';
+        audio.addEventListener('playing', () => {
+            playingSrc = currentSrc;
+        });
+        audio.addEventListener('ended', () => {
+            playingSrc = null;
+        });
+        audio.addEventListener('pause', () => {
+            playingSrc = null;
+        });
     }
 
     function destroy() {
@@ -29,6 +42,7 @@ export function createSharedSnippetPlayer(): SharedSnippetPlayer {
         audio.currentTime = 0;
         audio.removeAttribute('src');
         currentSrc = null;
+        playingSrc = null;
         audio = null;
     }
 
@@ -65,5 +79,9 @@ export function createSharedSnippetPlayer(): SharedSnippetPlayer {
         return currentSrc;
     }
 
-    return { mount, destroy, play, stop, setVolume, getCurrentSrc };
+    function isPlaying(src: string) {
+        return playingSrc === src;
+    }
+
+    return { mount, destroy, play, stop, setVolume, getCurrentSrc, isPlaying };
 }
