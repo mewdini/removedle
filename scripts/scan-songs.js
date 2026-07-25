@@ -152,6 +152,15 @@ async function scanSongs() {
                     duration,
                     contentHash,
                     links: existingEntry?.links || {},
+                    // Preserve resolve-links.js state across re-scans (undefined
+                    // keys drop out of JSON). scan-songs.js owns only the master
+                    // fields above; these link fields belong to resolve-links.js
+                    // and are carried untouched so a re-scan never clobbers link
+                    // health: the ISRC read from source masters, the dated "no
+                    // hit" stamps per source, and the hidden dead links.
+                    isrc: existingEntry?.isrc,
+                    tried: existingEntry?.tried,
+                    deadLinks: existingEntry?.deadLinks,
                 };
 
                 const slug = albumName.toLowerCase().replace(/[^a-z0-9]/g, '-');

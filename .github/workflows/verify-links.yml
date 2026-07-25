@@ -1,0 +1,57 @@
+name: Verify Links
+
+on:
+    schedule:
+        # Weekly liveness pass over the streaming links: HEAD-check every link,
+        # heal a dead one via MusicLink, and hide what it can't heal. Does NO
+        # scraping (that stays local), so it is safe to run unattended. Mondays
+        # 06:00 UTC, an hour after the daily-challenge run so the two never overlap.
+        - cron: '0 6 * * 1'
+    workflow_dispatch:
+
+jobs:
+    verify:
+        if: github.repository == 'mewdini/removedle' && (github.event_name == 'schedule' || github.actor == 'mewdini')
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version-file: .nvmrc
+                  cache: 'pnpm'
+
+            - name: Install dependencies
+              run: pnpm install
+
+            # Always pull fresh (no cache): the registry is the source of truth and
+            # this job writes link health back to it. Only data is needed -- verify
+            # reads the persisted entry.isrc, HEAD-checks links, and heals by ISRC,
+            # so it never needs the masters or the album art.
+            - name: Pull Data from R2
+              run: node scripts/sync-r2.js pull-data
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            - name: Verify, heal & hide links
+              run: pnpm links --verify
+              env:
+                  DATA_DIR: ./out/data
+                  MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
+
+            # push-data also syncs out/covers -> art/. This job pulled no art, so
+            # an empty dir makes that a no-op and leaves the album covers untouched.
+            - name: Push Data to R2
+              run: |
+                  mkdir -p out/covers
+                  node scripts/sync-r2.js push-data
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
