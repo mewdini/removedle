@@ -10,6 +10,11 @@ on:
         # that is 07:00-08:00 UTC depending on DST). The run on day D produces the
         # D+1 date string, so the challenge lands in R2 ~26 hours before it is
         # needed -- ample slack even if a run is delayed.
+        #
+        # The same run also does a full streaming-link liveness sweep, folded in
+        # from the old standalone verify-links cron: one schedule we know fires
+        # beats two independently-scheduled ones, given how much GitHub delays and
+        # drops scheduled runs.
         - cron: '9 5 * * *'
     workflow_dispatch:
         inputs:
@@ -30,6 +35,11 @@ jobs:
     generate:
         if: github.repository == 'mewdini/removedle' && (github.event_name == 'schedule' || github.actor == 'mewdini')
         runs-on: ubuntu-latest
+        # issues: write for the rolling link-health issue below; contents: read for
+        # checkout. No contents: write -- this job never commits to the repo.
+        permissions:
+            contents: read
+            issues: write
         steps:
             - uses: actions/checkout@v7
 
@@ -72,8 +82,9 @@ jobs:
                   END_DATE="${{ github.event.inputs.end_date }}"
                   TARGET_DATE="${{ github.event.inputs.target_date }}"
 
-                  # Record each date generated so the link-verify step below knows
-                  # exactly which challenges to check.
+                  # A plain record of the dates this run generated (handy in the run
+                  # log for a range backfill); the link sweep below verifies the whole
+                  # catalog, so nothing consumes this file anymore.
                   : > generated-dates.txt
 
                   if [ -n "$START_DATE" ] && [ -n "$END_DATE" ]; then
@@ -105,26 +116,35 @@ jobs:
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
-            # Before the challenge goes live, verify the streaming links of the
-            # tracks it features, so players don't hit a dead link on the results
-            # screen: HEAD-check each, heal via MusicLink, hide what can't be healed.
-            # continue-on-error so a link hiccup never blocks publishing the audio.
-            # Fresh pull-data first (the cached out/data may be stale) makes the
-            # scoped registry write safe against the weekly verify-links cron;
-            # push-data-json publishes the changes without touching album art.
-            - name: Verify challenge links (pre-publish)
+            # Publish the audio first, so tomorrow's challenge is live no matter what
+            # the link pass does next. Audio (challenges bucket) and links (data
+            # bucket) are independent, so nothing about the challenge depends on the
+            # verify below -- putting it first means a slow or failing link sweep can
+            # never delay or block the audio.
+            - name: Push Snippets to R2
+              run: node scripts/sync-r2.js push-challenges
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Full liveness pass over EVERY streaming link, folded in from the old
+            # standalone verify-links cron. HEAD-check each link, heal a dead one
+            # (MusicLink; the YouTube Data API for `youtube`; co-derive `youtubeMusic`
+            # from the healed `youtube` id), hide what can't be healed. Does NO
+            # scraping, so it is safe unattended. Tomorrow's challenge tracks are a
+            # subset of the catalog, so they are verified ~26h before players reach
+            # them -- this replaces the old scoped pre-publish pass. continue-on-error
+            # so a link hiccup never blocks the challenge; fresh pull-data first;
+            # push-data-json publishes link changes without touching album art.
+            - name: Verify, heal & hide links
               id: verify_links
               continue-on-error: true
               run: |
                   node scripts/sync-r2.js pull-data
-                  while read -r DATE; do
-                      [ -n "$DATE" ] || continue
-                      echo "Verifying links for challenge $DATE..."
-                      node scripts/resolve-links.js --verify --challenge="$DATE"
-                  done < generated-dates.txt
+                  pnpm links --verify
                   node scripts/sync-r2.js push-data-json
               env:
-                  OUTPUT_DIR: ./out/dailies
                   DATA_DIR: ./out/data
                   MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
                   YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -132,24 +152,81 @@ jobs:
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
-            # The step above is continue-on-error so a failure never blocks the
-            # publish; surface it anyway (`outcome` is the pre-continue result) as
-            # a warning annotation + run summary, so a silently-skipped verification
-            # is still visible instead of hiding behind a green run.
+            # verify_links is continue-on-error so a failure never blocks the publish;
+            # surface it anyway (`outcome` is the pre-continue result) as a warning
+            # annotation + run summary, so a silently-skipped sweep is visible instead
+            # of hiding behind a green run. The next daily run re-verifies everything,
+            # so a single miss is never fatal.
             - name: Flag failed link verification
               if: steps.verify_links.outcome == 'failure'
               run: |
-                  DATES="$(tr '\n' ' ' < generated-dates.txt)"
-                  echo "::warning title=Challenge link verification failed::Links for [$DATES] were NOT verified/healed this run (the step errored). The challenge still publishes; the weekly verify-links sweep will catch dead links."
+                  echo "::warning title=Link verification failed::The link sweep errored this run, so streaming links were not verified/healed. The challenge audio still published; the next daily run re-verifies."
                   {
-                      echo "### ⚠️ Challenge link verification failed"
+                      echo "### ⚠️ Link verification failed"
                       echo ""
-                      echo "The pre-publish link check errored, so links for **$DATES** were not verified or healed this run. The challenge audio published normally; the weekly \`verify-links\` sweep remains a backstop. See the *Verify challenge links* step log for the exception."
+                      echo "The link sweep errored this run, so streaming links were not verified or healed. The challenge audio published normally, and the next daily run is the backstop. See the *Verify, heal & hide links* step log for the exception."
                   } >> "$GITHUB_STEP_SUMMARY"
 
-            - name: Push Snippets to R2
-              run: node scripts/sync-r2.js push-challenges
+            # Machine-readable snapshot of what still needs a human, from the registry
+            # this run just wrote (persistent deadLinks, not the per-run
+            # link-issues.json). verify_links is continue-on-error, so this and the
+            # issue step still run after a link hiccup.
+            - name: Build link-health report
+              run: node scripts/link-issues.js --json > link-issues-report.json
               env:
-                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+                  DATA_DIR: ./out/data
+
+            # Maintain ONE rolling "link-health" issue: update it while anything is
+            # hidden/missing, auto-close it when everything is healthy again. No
+            # per-link spam, and no extra secret -- the default GITHUB_TOKEN suffices.
+            - name: File link-health issue
+              uses: actions/github-script@v9
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const { dead, empty } = JSON.parse(fs.readFileSync('link-issues-report.json', 'utf8'));
+                      const LABEL = 'link-health';
+                      const TITLE = 'Streaming links needing attention';
+
+                      const open = (await github.rest.issues.listForRepo({
+                          ...context.repo, labels: LABEL, state: 'open',
+                      })).data[0];
+
+                      if (!dead.length && !empty.length) {
+                          if (open) {
+                              await github.rest.issues.createComment({
+                                  ...context.repo, issue_number: open.number,
+                                  body: 'All streaming links healthy again — closing.',
+                              });
+                              await github.rest.issues.update({
+                                  ...context.repo, issue_number: open.number, state: 'closed',
+                              });
+                          }
+                          return;
+                      }
+
+                      let body = 'Maintained automatically by `daily-challenges.yml` (rewritten each run).\n\n';
+                      if (dead.length) {
+                          body += `## Dead links hidden from players (${dead.length})\n\n`;
+                          body += '| Song | Platform | URL | Dead since |\n|---|---|---|---|\n';
+                          for (const d of dead) body += `| ${d.title} | ${d.platform} | ${d.url} | ${d.since} |\n`;
+                          body += '\n';
+                      }
+                      if (empty.length) {
+                          body += `## Songs with no links at all (${empty.length})\n\n`;
+                          for (const e of empty) body += `- ${e.title} (\`${e.id}\`)\n`;
+                          body += '\n';
+                      }
+                      body += 'Recover with a local `pnpm links` (full scrapers), or hand-add the URL to the song in the registry, then `pnpm scan` + push-data.';
+
+                      try {
+                          await github.rest.issues.getLabel({ ...context.repo, name: LABEL });
+                      } catch {
+                          await github.rest.issues.createLabel({ ...context.repo, name: LABEL, color: 'd73a4a' });
+                      }
+
+                      if (open) {
+                          await github.rest.issues.update({ ...context.repo, issue_number: open.number, title: TITLE, body });
+                      } else {
+                          await github.rest.issues.create({ ...context.repo, title: TITLE, body, labels: [LABEL] });
+                      }
