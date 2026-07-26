@@ -113,6 +113,7 @@ jobs:
             # scoped registry write safe against the weekly verify-links cron;
             # push-data-json publishes the changes without touching album art.
             - name: Verify challenge links (pre-publish)
+              id: verify_links
               continue-on-error: true
               run: |
                   node scripts/sync-r2.js pull-data
@@ -129,6 +130,21 @@ jobs:
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # The step above is continue-on-error so a failure never blocks the
+            # publish; surface it anyway (`outcome` is the pre-continue result) as
+            # a warning annotation + run summary, so a silently-skipped verification
+            # is still visible instead of hiding behind a green run.
+            - name: Flag failed link verification
+              if: steps.verify_links.outcome == 'failure'
+              run: |
+                  DATES="$(tr '\n' ' ' < generated-dates.txt)"
+                  echo "::warning title=Challenge link verification failed::Links for [$DATES] were NOT verified/healed this run (the step errored). The challenge still publishes; the weekly verify-links sweep will catch dead links."
+                  {
+                      echo "### ⚠️ Challenge link verification failed"
+                      echo ""
+                      echo "The pre-publish link check errored, so links for **$DATES** were not verified or healed this run. The challenge audio published normally; the weekly \`verify-links\` sweep remains a backstop. See the *Verify challenge links* step log for the exception."
+                  } >> "$GITHUB_STEP_SUMMARY"
 
             - name: Push Snippets to R2
               run: node scripts/sync-r2.js push-challenges
