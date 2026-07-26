@@ -132,8 +132,7 @@ Two GitHub Actions handle content:
 
 ## Acknowledgements
 
-- Per-song streaming links (shown on the results screen and the 404 page) are resolved by ISRC through [MusicLink](https://ml.jadquir.com), the Songlink/Odesli successor, and cached at build/cron time.
-- Forked from [underscordle](https://github.com/angelolz/underscordle) by [angelolz](https://github.com/angelolz).
+Per-song streaming links (shown on the results screen and the 404 page) are resolved by ISRC through [MusicLink](https://ml.jadquir.com), the Songlink/Odesli successor, and cached at build/cron time.
 
 ## License
 
