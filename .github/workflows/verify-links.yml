@@ -49,12 +49,10 @@ jobs:
                   DATA_DIR: ./out/data
                   MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
 
-            # push-data also syncs out/covers -> art/. This job pulled no art, so
-            # an empty dir makes that a no-op and leaves the album covers untouched.
+            # push-data-json pushes the data manifests only, not album art -- this
+            # job touches links, never covers, so it needs no out/covers.
             - name: Push Data to R2
-              run: |
-                  mkdir -p out/covers
-                  node scripts/sync-r2.js push-data
+              run: node scripts/sync-r2.js push-data-json
               env:
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

@@ -36,13 +36,20 @@ async function main() {
                 await syncPush(DIRS.art, BUCKETS.data, 'art');
                 break;
 
+            // Data manifests only (registry, songs/covers json, link-issues) --
+            // NOT album art. For jobs that touch links but not covers (the link
+            // verify cron), so they need no out/covers and never re-push art.
+            case 'push-data-json':
+                await syncPush(DIRS.data, BUCKETS.data, '');
+                break;
+
             case 'push-challenges':
                 await syncPush(DIRS.dailies, BUCKETS.challenges, '');
                 break;
 
             default:
                 console.log(
-                    'Usage: node scripts/sync-r2.js [pull-masters|pull-data|pull-art|push-masters|push-data|push-challenges]'
+                    'Usage: node scripts/sync-r2.js [pull-masters|pull-data|pull-art|push-masters|push-data|push-data-json|push-challenges]'
                 );
                 process.exit(1);
         }

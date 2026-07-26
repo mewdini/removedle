@@ -72,12 +72,17 @@ jobs:
                   END_DATE="${{ github.event.inputs.end_date }}"
                   TARGET_DATE="${{ github.event.inputs.target_date }}"
 
+                  # Record each date generated so the link-verify step below knows
+                  # exactly which challenges to check.
+                  : > generated-dates.txt
+
                   if [ -n "$START_DATE" ] && [ -n "$END_DATE" ]; then
                       echo "Generating range: $START_DATE to $END_DATE"
                       CURRENT="$START_DATE"
                       while [[ "$CURRENT" < "$END_DATE" || "$CURRENT" == "$END_DATE" ]]; do
                           echo "Processing $CURRENT..."
                           node scripts/generate-daily.js "$CURRENT"
+                          echo "$CURRENT" >> generated-dates.txt
                           CURRENT=$(date -I -d "$CURRENT + 1 day")
                       done
                   else
@@ -86,6 +91,7 @@ jobs:
                       fi
                       echo "Generating for date: $TARGET_DATE"
                       node scripts/generate-daily.js "$TARGET_DATE"
+                      echo "$TARGET_DATE" >> generated-dates.txt
                   fi
               env:
                   MASTERS_DIR: ./out/masters
@@ -95,6 +101,31 @@ jobs:
                   # reads the previous days' meta.json over the S3 API to avoid
                   # repeating songs. Without these it throws instead of silently
                   # producing a challenge with no de-duplication.
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Before the challenge goes live, verify the streaming links of the
+            # tracks it features, so players don't hit a dead link on the results
+            # screen: HEAD-check each, heal via MusicLink, hide what can't be healed.
+            # continue-on-error so a link hiccup never blocks publishing the audio.
+            # Fresh pull-data first (the cached out/data may be stale) makes the
+            # scoped registry write safe against the weekly verify-links cron;
+            # push-data-json publishes the changes without touching album art.
+            - name: Verify challenge links (pre-publish)
+              continue-on-error: true
+              run: |
+                  node scripts/sync-r2.js pull-data
+                  while read -r DATE; do
+                      [ -n "$DATE" ] || continue
+                      echo "Verifying links for challenge $DATE..."
+                      node scripts/resolve-links.js --verify --challenge="$DATE"
+                  done < generated-dates.txt
+                  node scripts/sync-r2.js push-data-json
+              env:
+                  OUTPUT_DIR: ./out/dailies
+                  DATA_DIR: ./out/data
+                  MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

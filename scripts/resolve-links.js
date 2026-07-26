@@ -25,6 +25,9 @@
 //                         is not retried. Also patches songs.json so the hide is
 //                         published without a masters-dependent `pnpm scan`.
 //                         Records hidden links in out/data/link-issues.json.
+//   --only=<id,...>       Scope either mode to specific song ids.
+//   --challenge=<date>    Scope to the songs in out/dailies/<date>/meta.json --
+//                         used to verify a day's challenge tracks before publish.
 //
 // This script owns ONLY the registry's link fields (links, deadLinks, tried,
 // isrc); scan-songs.js owns the master fields. They never write the same keys,
@@ -57,6 +60,14 @@ const ML_KEY = process.env.MUSICLINK_API_KEY;
 const VERIFY = process.argv.includes('--verify');
 const limitArg = process.argv.find((a) => a.startsWith('--limit='));
 const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : Infinity;
+// Scope a run to specific songs: --only=<id,id,...> directly, or --challenge=<date>
+// to resolve the ids from that day's out/dailies/<date>/meta.json. Used by the
+// daily pipeline to verify a challenge's tracks before it goes live.
+const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+const ONLY_IDS = onlyArg ? onlyArg.split('=')[1].split(',').filter(Boolean) : [];
+const challengeArg = process.argv.find((a) => a.startsWith('--challenge='));
+const CHALLENGE_DATE = challengeArg ? challengeArg.split('=')[1] : null;
+const DAILIES_DIR = process.env.OUTPUT_DIR || path.resolve(__dirname, '../out/dailies');
 
 // MusicLink link key -> the app's StreamingLinks key (src/lib/interfaces.ts)
 const ML_MAP = {
@@ -440,8 +451,20 @@ async function main() {
     let hidden = 0;
     let touched = 0;
 
+    // Optional scoping to a subset of songs (e.g. one day's challenge tracks).
+    let only = ONLY_IDS.length ? new Set(ONLY_IDS) : null;
+    if (CHALLENGE_DATE) {
+        const meta = JSON.parse(
+            await fs.readFile(path.join(DAILIES_DIR, CHALLENGE_DATE, 'meta.json'), 'utf-8')
+        );
+        const ids = (meta.rounds || []).map((r) => r.songId);
+        only = new Set([...(only || []), ...ids]);
+        console.log(`Scoped to challenge ${CHALLENGE_DATE}: ${ids.length} song(s)`);
+    }
+
     for (const [id, entry] of Object.entries(registry)) {
         if (touched >= LIMIT) break;
+        if (only && !only.has(id)) continue;
         // This script owns only the link fields (links, deadLinks, tried, isrc);
         // it never touches the master fields scan-songs.js owns, so the two can
         // alternate on the shared registry without clobbering each other.
