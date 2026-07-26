@@ -1,6 +1,6 @@
 import type { PageServerLoad } from './$types';
 import { START_DATE_STRING } from '$lib/statics';
-import { calculateDays } from '../../params/date';
+import { calculateDays, getTodayDate } from '../../params/date';
 
 export const load: PageServerLoad = async () => {
     const start = new Date(START_DATE_STRING);
@@ -8,10 +8,10 @@ export const load: PageServerLoad = async () => {
         Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
     );
 
-    const today = new Date();
-    const todayUtc = new Date(
-        Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
-    );
+    // "Today" is the Pacific calendar day (the game rolls over at PT midnight),
+    // pinned to UTC-midnight so the enumeration below yields clean date strings.
+    const [ty, tm, td] = getTodayDate().split('-').map(Number);
+    const todayUtc = new Date(Date.UTC(ty, tm - 1, td));
 
     const archiveEntries: { date: string; day: number }[] = [];
     const current = new Date(todayUtc);

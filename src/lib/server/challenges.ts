@@ -10,6 +10,7 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { challengeStats } from './db/schema';
 import { eq, sql } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
+import { getTodayDate } from '../../params/date';
 
 type AlbumEntry = {
     name: string;
@@ -30,15 +31,10 @@ export function validateChallengeDate(value: string): boolean {
 }
 
 export function isFutureChallengeDate(value: string): boolean {
-    const today = new Date();
-    const todayUtc = new Date(
-        Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
-    );
-
-    const [year, month, day] = value.split('-').map(Number);
-    const candidate = new Date(Date.UTC(year, month - 1, day));
-
-    return candidate.getTime() > todayUtc.getTime();
+    // Future = after the current Pacific calendar day (the game rolls over at PT
+    // midnight). Zero-padded ISO date strings compare lexically in chronological
+    // order, and `value` is validated as YYYY-MM-DD by the date param matcher.
+    return value > getTodayDate();
 }
 
 // Dates before day 1 are not part of the game. Without this they are merely

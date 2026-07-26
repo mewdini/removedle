@@ -22,5 +22,15 @@ export function calculateDays(startDate: string, endDate: string) {
 }
 
 export function getTodayDate() {
-    return new Date().toISOString().split('T')[0];
+    // The game rolls over at Pacific midnight, not UTC. `Intl` gives the calendar
+    // date in America/Los_Angeles (auto-handling PST/PDT) as YYYY-MM-DD. It works
+    // the same on the server (Workers ship full ICU) and in every visitor's
+    // browser regardless of their local timezone, so all players load the same
+    // Pacific day.
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Los_Angeles',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(new Date());
 }
