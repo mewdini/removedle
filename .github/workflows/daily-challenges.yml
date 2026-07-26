@@ -171,7 +171,10 @@ jobs:
             # this run just wrote (persistent deadLinks, not the per-run
             # link-issues.json). verify_links is continue-on-error, so this and the
             # issue step still run after a link hiccup.
+            # continue-on-error: notification is not the job's critical path, so a
+            # failure here must never red the run that just published the challenge.
             - name: Build link-health report
+              continue-on-error: true
               run: node scripts/link-issues.js --json > link-issues-report.json
               env:
                   DATA_DIR: ./out/data
@@ -179,54 +182,65 @@ jobs:
             # Maintain ONE rolling "link-health" issue: update it while anything is
             # hidden/missing, auto-close it when everything is healthy again. No
             # per-link spam, and no extra secret -- the default GITHUB_TOKEN suffices.
+            # The whole body is wrapped so a filing failure (issues disabled, API
+            # hiccup, missing report) degrades to a warning + run summary instead of
+            # failing the job; continue-on-error is the belt to that suspenders.
             - name: File link-health issue
+              continue-on-error: true
               uses: actions/github-script@v9
               with:
                   script: |
                       const fs = require('fs');
-                      const { dead, empty } = JSON.parse(fs.readFileSync('link-issues-report.json', 'utf8'));
-                      const LABEL = 'link-health';
-                      const TITLE = 'Streaming links needing attention';
-
-                      const open = (await github.rest.issues.listForRepo({
-                          ...context.repo, labels: LABEL, state: 'open',
-                      })).data[0];
-
-                      if (!dead.length && !empty.length) {
-                          if (open) {
-                              await github.rest.issues.createComment({
-                                  ...context.repo, issue_number: open.number,
-                                  body: 'All streaming links healthy again — closing.',
-                              });
-                              await github.rest.issues.update({
-                                  ...context.repo, issue_number: open.number, state: 'closed',
-                              });
-                          }
-                          return;
-                      }
-
-                      let body = 'Maintained automatically by `daily-challenges.yml` (rewritten each run).\n\n';
-                      if (dead.length) {
-                          body += `## Dead links hidden from players (${dead.length})\n\n`;
-                          body += '| Song | Platform | URL | Dead since |\n|---|---|---|---|\n';
-                          for (const d of dead) body += `| ${d.title} | ${d.platform} | ${d.url} | ${d.since} |\n`;
-                          body += '\n';
-                      }
-                      if (empty.length) {
-                          body += `## Songs with no links at all (${empty.length})\n\n`;
-                          for (const e of empty) body += `- ${e.title} (\`${e.id}\`)\n`;
-                          body += '\n';
-                      }
-                      body += 'Recover with a local `pnpm links` (full scrapers), or hand-add the URL to the song in the registry, then `pnpm scan` + push-data.';
-
                       try {
-                          await github.rest.issues.getLabel({ ...context.repo, name: LABEL });
-                      } catch {
-                          await github.rest.issues.createLabel({ ...context.repo, name: LABEL, color: 'd73a4a' });
-                      }
+                          const { dead, empty } = JSON.parse(fs.readFileSync('link-issues-report.json', 'utf8'));
+                          const LABEL = 'link-health';
+                          const TITLE = 'Streaming links needing attention';
 
-                      if (open) {
-                          await github.rest.issues.update({ ...context.repo, issue_number: open.number, title: TITLE, body });
-                      } else {
-                          await github.rest.issues.create({ ...context.repo, title: TITLE, body, labels: [LABEL] });
+                          const open = (await github.rest.issues.listForRepo({
+                              ...context.repo, labels: LABEL, state: 'open',
+                          })).data[0];
+
+                          if (!dead.length && !empty.length) {
+                              if (open) {
+                                  await github.rest.issues.createComment({
+                                      ...context.repo, issue_number: open.number,
+                                      body: 'All streaming links healthy again — closing.',
+                                  });
+                                  await github.rest.issues.update({
+                                      ...context.repo, issue_number: open.number, state: 'closed',
+                                  });
+                              }
+                              return;
+                          }
+
+                          let body = 'Maintained automatically by `daily-challenges.yml` (rewritten each run).\n\n';
+                          if (dead.length) {
+                              body += `## Dead links hidden from players (${dead.length})\n\n`;
+                              body += '| Song | Platform | URL | Dead since |\n|---|---|---|---|\n';
+                              for (const d of dead) body += `| ${d.title} | ${d.platform} | ${d.url} | ${d.since} |\n`;
+                              body += '\n';
+                          }
+                          if (empty.length) {
+                              body += `## Songs with no links at all (${empty.length})\n\n`;
+                              for (const e of empty) body += `- ${e.title} (\`${e.id}\`)\n`;
+                              body += '\n';
+                          }
+                          body += 'Recover with a local `pnpm links` (full scrapers), or hand-add the URL to the song in the registry, then `pnpm scan` + push-data.';
+
+                          try {
+                              await github.rest.issues.getLabel({ ...context.repo, name: LABEL });
+                          } catch {
+                              await github.rest.issues.createLabel({ ...context.repo, name: LABEL, color: 'd73a4a' });
+                          }
+
+                          if (open) {
+                              await github.rest.issues.update({ ...context.repo, issue_number: open.number, title: TITLE, body });
+                          } else {
+                              await github.rest.issues.create({ ...context.repo, title: TITLE, body, labels: [LABEL] });
+                          }
+                      } catch (e) {
+                          core.warning(`link-health issue update failed (links were still verified/hidden): ${e.message}`);
+                          await core.summary
+                              .addRaw(`### ⚠️ link-health issue update failed\n\nLinks were still verified and dead ones hidden; only the notification failed.\n\n\`${e.message}\`\n`)
+                              .write();
                       }
