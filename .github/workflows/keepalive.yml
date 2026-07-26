@@ -1,0 +1,33 @@
+name: Keepalive
+
+on:
+    schedule:
+        # Public repos auto-disable scheduled workflows after 60 days with no
+        # repository activity, which would silently kill the daily-challenge cron.
+        # A weekly empty commit keeps activity fresh -- each commit resets the
+        # 60-day clock for every scheduled workflow, including this one, so the set
+        # is self-sustaining as long as this runs at least once every ~60 days.
+        # Sunday 07:27 UTC: a distinct hour from the daily (05:09) and verify
+        # (Mon 06:09) crons, and off the top of the hour to dodge high-load drops.
+        # `[skip ci]` asks Workers Builds not to deploy the no-op commit; if that
+        # is not honored the worst case is a harmless empty build, never a missed
+        # reset (the reset is what matters, so it commits to the default branch).
+        - cron: '27 7 * * 0'
+    workflow_dispatch:
+
+jobs:
+    keepalive:
+        if: github.repository == 'mewdini/removedle'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v4
+            - name: Empty keepalive commit
+              run: |
+                  git config user.name 'github-actions[bot]'
+                  git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+                  git commit --allow-empty -m 'chore: keepalive [skip ci]'
+                  # checkout leaves a detached HEAD on scheduled runs; push the
+                  # commit to the branch explicitly.
+                  git push origin HEAD:main

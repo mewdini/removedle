@@ -5,8 +5,10 @@ on:
         # Weekly liveness pass over the streaming links: HEAD-check every link,
         # heal a dead one via MusicLink, and hide what it can't heal. Does NO
         # scraping (that stays local), so it is safe to run unattended. Mondays
-        # 06:00 UTC, an hour after the daily-challenge run so the two never overlap.
-        - cron: '0 6 * * 1'
+        # 06:09 UTC -- an hour after the 05:09 daily-challenge run (which finishes
+        # in a couple of minutes), so the two never overlap even with cron jitter,
+        # and off the top of the hour to dodge GitHub's high-load drops.
+        - cron: '9 6 * * 1'
     workflow_dispatch:
 
 jobs:

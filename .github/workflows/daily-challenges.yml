@@ -2,15 +2,15 @@ name: Daily Challenges
 
 on:
     schedule:
-        # 05:00 UTC = midnight EST. GitHub cron is always UTC and does not
-        # observe daylight saving, so this lands at 01:00 EDT in summer. Use
-        # '0 4 * * *' instead if you would rather it track EDT and drift in
-        # winter; there is no setting that follows both.
+        # 05:09 UTC daily. Deliberately off the top of the hour: GitHub can delay
+        # or drop scheduled runs during the high-load spike at :00.
         #
-        # This is only when generation runs. Challenges unlock for players at
-        # 00:00 UTC via the date gate, which is unrelated. The run on day D
-        # produces D+1, so this leaves ~19 hours of slack before it is needed.
-        - cron: '0 5 * * *'
+        # This is only WHEN generation runs. Challenges unlock for players at
+        # 00:00 Pacific (the site rolls over at PT midnight -- see getTodayDate;
+        # that is 07:00-08:00 UTC depending on DST). The run on day D produces the
+        # D+1 date string, so the challenge lands in R2 ~26 hours before it is
+        # needed -- ample slack even if a run is delayed.
+        - cron: '9 5 * * *'
     workflow_dispatch:
         inputs:
             target_date:
