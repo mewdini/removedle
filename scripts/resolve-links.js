@@ -407,12 +407,15 @@ async function oembedInfo(id) {
 // youtube.com scrape when no key is set. Returns { ok, id }.
 async function youtubeVideo(title, artist) {
     if (!YT_KEY) return youtubeScrapeVideo(title, artist);
-    try {
-        const q = encodeURIComponent(`${artist} ${title}`);
+    // One search attempt for a given query string. `lastResort` allows the old
+    // "first non-Topic result" fallback; the retry below sets it false so a
+    // simplified query can only ever return a strict full-title match.
+    const attempt = async (queryTitle, lastResort) => {
+        const q = encodeURIComponent(`${artist} ${queryTitle}`);
         const res = await fetchT(
             `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=15&q=${q}&key=${YT_KEY}`
         );
-        if (!res.ok) return { ok: false, id: null };
+        if (!res.ok) return null;
         const j = await res.json();
         const items = (j.items || [])
             .map((it) => ({
@@ -421,13 +424,27 @@ async function youtubeVideo(title, artist) {
                 title: it.snippet?.title || '',
             }))
             .filter((x) => x.id && !isTopic(x.ch));
+        // Acceptance is ALWAYS against the full title, never the simplified query,
+        // so a shorter query can never let a different song through.
         const titled = items.filter((x) => norm(x.title).includes(norm(title)));
         const best =
             titled.find((x) => norm(x.ch) === norm(artist)) ||
             titled.find((x) => norm(x.ch).includes(norm(artist))) ||
             titled[0] ||
-            items[0];
-        return { ok: true, id: best?.id || null };
+            (lastResort ? items[0] : null);
+        return best?.id || null;
+    };
+    try {
+        let id = await attempt(title, true);
+        if (!id) {
+            // Multi-part titles ("A / B") and parenthetical suffixes can make the
+            // search itself return nothing; retry on the primary segment. The full
+            // title still has to appear in the matched video's title, so the real
+            // "A / B (audio)" upload matches while a bare "A" of another song does not.
+            const primary = title.split(/\s*[/(]/)[0].trim();
+            if (primary && norm(primary) !== norm(title)) id = await attempt(primary, false);
+        }
+        return { ok: true, id };
     } catch {
         return { ok: false, id: null };
     }
