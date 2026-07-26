@@ -20,13 +20,13 @@ jobs:
             contents: read
             issues: write
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - name: Install pnpm
-              uses: pnpm/action-setup@v4
+              uses: pnpm/action-setup@v6
 
             - name: Setup Node.js
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v7
               with:
                   node-version-file: .nvmrc
                   cache: 'pnpm'
@@ -72,7 +72,7 @@ jobs:
             # hidden/missing, auto-close it when everything is healthy again. No
             # per-link spam, and no extra secret -- the default GITHUB_TOKEN suffices.
             - name: File link-health issue
-              uses: actions/github-script@v7
+              uses: actions/github-script@v9
               with:
                   script: |
                       const fs = require('fs');
