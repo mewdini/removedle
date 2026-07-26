@@ -246,6 +246,11 @@
         if (!date || gameState.hasSaved) return;
 
         const points = calculatePoints(gameState);
+
+        // Claim the save before awaiting so a second in-flight fire (e.g. another
+        // open tab, or this effect re-running) sees hasSaved and bails. Released
+        // on failure so a genuine error can still be retried.
+        gameState.hasSaved = true;
         try {
             const formData = new FormData();
             formData.append('points', points.toString());
@@ -259,10 +264,12 @@
             });
 
             if (response.ok) {
-                gameState.hasSaved = true;
                 await invalidateAll();
+            } else {
+                gameState.hasSaved = false;
             }
         } catch (e) {
+            gameState.hasSaved = false;
             console.error('Failed to save score:', e);
         }
     }
