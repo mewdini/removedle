@@ -11,8 +11,9 @@
 //   3. SoundCloud: api-v2 search (client_id scraped from the site) for every
 //      track still missing a soundcloud link -- most tracks live there, and the
 //      ones that don't usually have unofficial re-uploads.
-//   4. YouTube Music: scrape youtube search for any track still missing a
-//      youtubeMusic link (MusicLink already fills it for indexed releases).
+//   4. YouTube: scrape youtube search for any track still missing a youtube or
+//      youtubeMusic link; one hit's video id fills both (MusicLink already fills
+//      them for indexed releases, so this covers the ISRC-less loosies).
 //   Bandcamp/SoundCloud/YouTube scrape, so they are fragile -- see --verify.
 //
 // Modes:
@@ -363,9 +364,12 @@ async function soundcloudLookup(title, artist) {
     return { ok: cat.ok || search.ok, links: {} };
 }
 
-// YouTube Music: scrape youtube search, take the first video whose title contains
-// the track title AND names the artist (guards against unrelated uploads).
-async function youtubeMusicSearch(title, artist) {
+// YouTube: scrape youtube search, take the first video whose title contains the
+// track title AND names the artist (guards against unrelated uploads). The same
+// video id is a valid regular-YouTube AND YouTube-Music URL, so one search yields
+// both platforms -- useful for the ISRC-less loosies, which often live only as
+// user uploads that MusicLink never sees.
+async function youtubeSearch(title, artist) {
     try {
         const res = await fetchT(
             'https://www.youtube.com/results?search_query=' +
@@ -397,7 +401,12 @@ async function youtubeMusicSearch(title, artist) {
         );
         return {
             ok: true,
-            links: hit ? { youtubeMusic: `https://music.youtube.com/watch?v=${hit.id}` } : {},
+            links: hit
+                ? {
+                      youtube: `https://www.youtube.com/watch?v=${hit.id}`,
+                      youtubeMusic: `https://music.youtube.com/watch?v=${hit.id}`,
+                  }
+                : {},
         };
     } catch {
         return { ok: false, links: {} };
@@ -534,9 +543,11 @@ async function main() {
         const needMusicLink = isrc && !musicLinked(entry.links) && fresh('musiclink');
         const needBandcamp = !entry.links.bandcamp && fresh('bandcamp');
         const needSoundcloud = !entry.links.soundcloud && fresh('soundcloud');
-        const needYtMusic = !entry.links.youtubeMusic && fresh('youtubeMusic');
+        // One YouTube search fills both youtube and youtubeMusic (same video id),
+        // so run it whenever either is missing.
+        const needYouTube = (!entry.links.youtube || !entry.links.youtubeMusic) && fresh('youtube');
 
-        if (needMusicLink || needBandcamp || needSoundcloud || needYtMusic) {
+        if (needMusicLink || needBandcamp || needSoundcloud || needYouTube) {
             touched++;
             const before = Object.keys(entry.links).length;
 
@@ -553,10 +564,23 @@ async function main() {
                 );
                 await sleep(500);
             }
-            if (needYtMusic) {
-                await trySource(entry, 'youtubeMusic', () =>
-                    youtubeMusicSearch(entry.title, entry.artist)
-                );
+            if (needYouTube) {
+                // Fill whichever of youtube / youtubeMusic is missing from the
+                // one search, without overwriting an existing (good) link.
+                const { ok, links } = await youtubeSearch(entry.title, entry.artist);
+                let added = false;
+                for (const k of ['youtube', 'youtubeMusic']) {
+                    if (!entry.links[k] && links[k]) {
+                        entry.links[k] = links[k];
+                        added = true;
+                    }
+                }
+                if (added) {
+                    if (entry.tried) delete entry.tried.youtube;
+                } else if (ok) {
+                    entry.tried = entry.tried || {};
+                    entry.tried.youtube = today();
+                }
                 await sleep(500);
             }
 
