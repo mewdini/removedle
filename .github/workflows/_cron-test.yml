@@ -1,0 +1,11 @@
+name: _cron-test
+on:
+    schedule:
+        - cron: '*/5 * * * *'
+    workflow_dispatch:
+jobs:
+    ping:
+        if: github.repository == 'mewdini/removedle'
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo "fired via ${{ github.event_name }} at $(date -u)"
