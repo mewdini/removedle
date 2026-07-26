@@ -11,32 +11,39 @@
 //   3. SoundCloud: api-v2 search (client_id scraped from the site) for every
 //      track still missing a soundcloud link -- most tracks live there, and the
 //      ones that don't usually have unofficial re-uploads.
-//   4. YouTube: scrape youtube search for any track still missing a youtube or
-//      youtubeMusic link; one hit's video id fills both (MusicLink already fills
-//      them for indexed releases, so this covers the ISRC-less loosies).
-//   Bandcamp/SoundCloud/YouTube scrape, so they are fragile -- see --verify.
+//   4. YouTube is resolved SEPARATELY from YouTube Music: `youtube` is the real
+//      music video (official YouTube Data API, so cron-safe), `youtubeMusic` is
+//      the Art Track -- the "<artist> - Topic" Song, via YT Music's internal
+//      search (unofficial, local only). MusicLink co-derives the two (one video
+//      id, both URLs), which is wrong wherever a distinct Art Track exists, so
+//      fixYouTube reconciles them -- co-deriving + flagging entry.coderived only
+//      as a last-resort fallback.
+//   Bandcamp/SoundCloud/YouTube-Music scrape, so they are fragile -- see --verify.
 //
 // Modes:
-//   pnpm links            LOCAL: fill missing platforms via MusicLink + the
-//                         Bandcamp/SoundCloud/YouTube scrapers (incremental).
-//   pnpm links --verify   LEAN CRON: HEAD-check every existing link; heal a dead
-//                         one via MusicLink only (no scraping); and HIDE any that
-//                         can't be healed by moving it to entry.deadLinks, out of
-//                         the client-facing links and marked heal-attempted so it
-//                         is not retried. Also patches songs.json so the hide is
-//                         published without a masters-dependent `pnpm scan`.
-//                         Records hidden links in out/data/link-issues.json.
-//   --only=<id,...>       Scope either mode to specific song ids.
-//   --challenge=<date>    Scope to the songs in out/dailies/<date>/meta.json --
-//                         used to verify a day's challenge tracks before publish.
+//   pnpm links               LOCAL: fill missing platforms via MusicLink + the
+//                            Bandcamp/SoundCloud scrapers (incremental).
+//   pnpm links --verify      LEAN CRON: HEAD-check every existing link; heal a
+//                            dead one via MusicLink/Data API (no fragile scraping);
+//                            and HIDE what can't be healed by moving it to
+//                            entry.deadLinks, out of the client-facing links and
+//                            marked heal-attempted. Patches songs.json so the hide
+//                            publishes without a masters-dependent `pnpm scan`.
+//                            Records hidden links in out/data/link-issues.json.
+//   pnpm links --fix-youtube LOCAL: reconcile youtube (real video) vs youtubeMusic
+//                            (Art Track) across the catalog -- corrects MusicLink's
+//                            co-derived pair. Uses YT Music's internal search.
+//   --only=<id,...>          Scope any mode to specific song ids.
+//   --challenge=<date>       Scope to the songs in out/dailies/<date>/meta.json --
+//                            used to verify a day's challenge tracks before publish.
 //
 // This script owns ONLY the registry's link fields (links, deadLinks, tried,
-// isrc); scan-songs.js owns the master fields. They never write the same keys,
-// so the two can alternate on the shared registry -- provided each starts from a
-// fresh pull-data (pull-data before a scan or a --verify run, push-data after).
+// isrc, coderived); scan-songs.js owns the master fields. They never write the
+// same keys, so the two can alternate on the shared registry -- provided each
+// starts from a fresh pull-data (pull-data before a scan or --verify, push after).
 //
-// MUSICLINK_API_KEY comes from .env (server-side only; never client, never committed).
-// ISRCs are read from the master files in out/masters, so this needs them present.
+// MUSICLINK_API_KEY + YOUTUBE_API_KEY come from .env (server-side only; never
+// client, never committed). ISRCs are read from the master files in out/masters.
 
 import 'dotenv/config';
 import fs from 'fs/promises';
@@ -58,7 +65,9 @@ const SONGS_FILE = path.join(DATA_DIR, 'songs.json');
 const SONGS_MIN_FILE = path.join(DATA_DIR, 'songs.min.json');
 
 const ML_KEY = process.env.MUSICLINK_API_KEY;
+const YT_KEY = process.env.YOUTUBE_API_KEY;
 const VERIFY = process.argv.includes('--verify');
+const FIX_YT = process.argv.includes('--fix-youtube');
 const limitArg = process.argv.find((a) => a.startsWith('--limit='));
 const LIMIT = limitArg ? Number(limitArg.split('=')[1]) : Infinity;
 // Scope a run to specific songs: --only=<id,id,...> directly, or --challenge=<date>
@@ -364,22 +373,77 @@ async function soundcloudLookup(title, artist) {
     return { ok: cat.ok || search.ok, links: {} };
 }
 
-// YouTube: scrape youtube search, take the first video whose title contains the
-// track title AND names the artist (guards against unrelated uploads). The same
-// video id is a valid regular-YouTube AND YouTube-Music URL, so one search yields
-// both platforms -- useful for the ISRC-less loosies, which often live only as
-// user uploads that MusicLink never sees.
-async function youtubeSearch(title, artist) {
+// --- YouTube + YouTube Music (resolved SEPARATELY) --------------------------
+// `youtube` = the real music video (regular YouTube). `youtubeMusic` = the Art
+// Track: the auto-generated "<artist> - Topic" Song. MusicLink co-derives them
+// (one id, both URLs), which is wrong whenever a distinct Art Track exists -- so
+// each is resolved from its own source, and fixYouTube() reconciles the pair.
+const vidId = (u) => {
+    const m = u && u.match(/[?&]v=([\w-]+)/);
+    return m ? m[1] : null;
+};
+const ytUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
+const ytmUrl = (id) => `https://music.youtube.com/watch?v=${id}`;
+const isTopic = (ch) => !!ch && / - Topic$/.test(ch);
+
+// oEmbed: a video's channel + title (and, as a side effect, that it is live).
+// Free, no key. Returns null on any failure (treat as unknown).
+async function oembedInfo(id) {
+    try {
+        const res = await fetchT(
+            `https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v=${id}`
+        );
+        if (!res.ok) return null;
+        const j = await res.json();
+        return { channel: j.author_name || '', title: j.title || '' };
+    } catch {
+        return null;
+    }
+}
+
+// Real music VIDEO via the official YouTube Data API (works from datacenter IPs,
+// so it is cron-safe). Prefers the artist's own channel and a title match, and
+// skips "- Topic" Art Tracks (those are the youtubeMusic side). Falls back to the
+// youtube.com scrape when no key is set. Returns { ok, id }.
+async function youtubeVideo(title, artist) {
+    if (!YT_KEY) return youtubeScrapeVideo(title, artist);
+    try {
+        const q = encodeURIComponent(`${artist} ${title}`);
+        const res = await fetchT(
+            `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=15&q=${q}&key=${YT_KEY}`
+        );
+        if (!res.ok) return { ok: false, id: null };
+        const j = await res.json();
+        const items = (j.items || [])
+            .map((it) => ({
+                id: it.id?.videoId,
+                ch: it.snippet?.channelTitle || '',
+                title: it.snippet?.title || '',
+            }))
+            .filter((x) => x.id && !isTopic(x.ch));
+        const titled = items.filter((x) => norm(x.title).includes(norm(title)));
+        const best =
+            titled.find((x) => norm(x.ch) === norm(artist)) ||
+            titled.find((x) => norm(x.ch).includes(norm(artist))) ||
+            titled[0] ||
+            items[0];
+        return { ok: true, id: best?.id || null };
+    } catch {
+        return { ok: false, id: null };
+    }
+}
+
+// Scrape fallback for youtubeVideo (no Data API key). First title+artist match.
+async function youtubeScrapeVideo(title, artist) {
     try {
         const res = await fetchT(
             'https://www.youtube.com/results?search_query=' +
                 encodeURIComponent(`${artist} ${title}`),
             { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US' } }
         );
-        if (!res.ok) return { ok: false, links: {} };
-        const html = await res.text();
-        const m = html.match(/ytInitialData\s*=\s*(\{.+?\});<\/script>/s);
-        if (!m) return { ok: false, links: {} };
+        if (!res.ok) return { ok: false, id: null };
+        const m = (await res.text()).match(/ytInitialData\s*=\s*(\{.+?\});<\/script>/s);
+        if (!m) return { ok: false, id: null };
         const vids = [];
         const walk = (o) => {
             if (!o || typeof o !== 'object') return;
@@ -399,18 +463,145 @@ async function youtubeSearch(title, artist) {
                 norm(v.title).includes(norm(title)) &&
                 (norm(v.title).includes(norm(artist)) || norm(v.ch).includes(norm(artist)))
         );
-        return {
-            ok: true,
-            links: hit
-                ? {
-                      youtube: `https://www.youtube.com/watch?v=${hit.id}`,
-                      youtubeMusic: `https://music.youtube.com/watch?v=${hit.id}`,
-                  }
-                : {},
-        };
+        return { ok: true, id: hit?.id || null };
     } catch {
-        return { ok: false, links: {} };
+        return { ok: false, id: null };
     }
+}
+
+// Art Track via YouTube Music's internal search (unofficial; local only). The
+// innertube key is a public constant; a SOCS cookie skips the consent page. The
+// search returns other artists' Art Tracks too, so we oEmbed the candidates and
+// take the "<artist> - Topic" Song, preferring a title match. Returns { ok, id }.
+const YTM_KEY = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
+const YTM_VER = '1.20241127.01.00';
+async function ytmArtTrack(title, artist) {
+    try {
+        const res = await fetchT(
+            `https://music.youtube.com/youtubei/v1/search?key=${YTM_KEY}&prettyPrint=false`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': UA,
+                    Origin: 'https://music.youtube.com',
+                    Referer: 'https://music.youtube.com/',
+                    Cookie: 'SOCS=CAI',
+                },
+                body: JSON.stringify({
+                    context: {
+                        client: {
+                            clientName: 'WEB_REMIX',
+                            clientVersion: YTM_VER,
+                            hl: 'en',
+                            gl: 'US',
+                        },
+                    },
+                    query: `${artist} ${title}`,
+                }),
+            }
+        );
+        if (!res.ok) return { ok: false, id: null };
+        const j = await res.json();
+        const ids = [];
+        const seen = new Set();
+        (function walk(o) {
+            if (!o || typeof o !== 'object') return;
+            if (typeof o.videoId === 'string' && !seen.has(o.videoId)) {
+                seen.add(o.videoId);
+                ids.push(o.videoId);
+            }
+            for (const k in o) walk(o[k]);
+        })(j);
+        for (const id of ids.slice(0, 10)) {
+            const info = await oembedInfo(id);
+            if (info && isTopic(info.channel) && norm(info.channel).includes(norm(artist))) {
+                // Substring match, but only when the shorter title is >=5 chars,
+                // so a tiny title like "me" doesn't match "ho-me-switcher". Short
+                // titles require an exact normalized match.
+                const t = norm(title);
+                const it = norm(info.title);
+                const titleMatch =
+                    it === t ||
+                    (it.includes(t) && t.length >= 5) ||
+                    (t.includes(it) && it.length >= 5);
+                if (titleMatch) return { ok: true, id };
+            }
+            await sleep(100);
+        }
+        // No title match -> no Art Track for this track. Do NOT fall back to the
+        // first "<artist> - Topic" result: those are OTHER songs, and returning
+        // one assigns the same wrong Art Track to many tracks. Caller co-derives.
+        return { ok: true, id: null };
+    } catch {
+        return { ok: false, id: null };
+    }
+}
+
+// Reconcile one song's youtube / youtubeMusic so `youtube` is the real video and
+// `youtubeMusic` is the Art Track. Classifies the current shared id via oEmbed,
+// then resolves the missing side from its own source (Data API / YT Music). When
+// the proper distinct link can't be found it CO-DERIVES (same id, other prefix)
+// -- always valid, even from a cron -- and sets entry.coderived[platform] so a
+// later run retries. Returns change tags for logging.
+async function fixYouTube(entry) {
+    const changes = [];
+    const flag = (p) => {
+        entry.coderived = entry.coderived || {};
+        entry.coderived[p] = true;
+    };
+    const unflag = (p) => {
+        if (entry.coderived) delete entry.coderived[p];
+    };
+    const set = (p, url, tag) => {
+        if (entry.links[p] !== url) {
+            entry.links[p] = url;
+            changes.push(tag);
+        }
+    };
+
+    const cur = vidId(entry.links.youtube) || vidId(entry.links.youtubeMusic);
+    let curTopic = null; // true=Art Track, false=real video, null=unknown/dead
+    if (cur) {
+        const info = await oembedInfo(cur);
+        curTopic = info ? isTopic(info.channel) : null;
+    }
+
+    // youtube = a real (non-Topic) video
+    if (curTopic === false) {
+        set('youtube', ytUrl(cur), 'youtube=video');
+        unflag('youtube');
+    } else {
+        const v = await youtubeVideo(entry.title, entry.artist);
+        if (v.id) {
+            set('youtube', ytUrl(v.id), `youtube=${v.id}`);
+            unflag('youtube');
+        } else if (cur) {
+            set('youtube', ytUrl(cur), 'youtube~coderived');
+            flag('youtube');
+        }
+    }
+
+    // youtubeMusic = the Art Track ("<artist> - Topic" Song)
+    if (curTopic === true) {
+        set('youtubeMusic', ytmUrl(cur), 'ytmusic=arttrack');
+        unflag('youtubeMusic');
+    } else {
+        const a = await ytmArtTrack(entry.title, entry.artist);
+        if (a.id) {
+            set('youtubeMusic', ytmUrl(a.id), `ytmusic=${a.id}`);
+            unflag('youtubeMusic');
+        } else {
+            const yid = vidId(entry.links.youtube) || cur;
+            if (yid) {
+                set('youtubeMusic', ytmUrl(yid), 'ytmusic~coderived');
+                flag('youtubeMusic');
+            }
+        }
+    }
+
+    if (entry.coderived && Object.keys(entry.coderived).length === 0) delete entry.coderived;
+    return changes;
 }
 
 // --- link liveness (for --verify) ------------------------------------------
@@ -471,6 +662,30 @@ async function main() {
         console.log(`Scoped to challenge ${CHALLENGE_DATE}: ${ids.length} song(s)`);
     }
 
+    // --fix-youtube: reconcile youtube/youtubeMusic across the catalog (or scope).
+    // A correction pass (overrides MusicLink's co-derived pair), separate from the
+    // fill-missing resolution below. Local only (uses YT Music scraping).
+    if (FIX_YT) {
+        let n = 0;
+        for (const [id, entry] of Object.entries(registry)) {
+            if (only && !only.has(id)) continue;
+            entry.links = entry.links || {};
+            const changes = await fixYouTube(entry);
+            if (changes.length) {
+                n++;
+                console.log(`  ~ ${entry.title}: ${changes.join(', ')}`);
+            }
+            await sleep(200);
+        }
+        const flagged = Object.values(registry).filter((e) => e.coderived).length;
+        await fs.writeFile(REGISTRY_FILE, JSON.stringify(registry, null, 2));
+        await syncCatalogLinks(registry);
+        console.log(
+            `\nfix-youtube: changed ${n} track(s) | ${flagged} co-derived (flagged for self-heal)`
+        );
+        return;
+    }
+
     for (const [id, entry] of Object.entries(registry)) {
         if (touched >= LIMIT) break;
         if (only && !only.has(id)) continue;
@@ -511,12 +726,37 @@ async function main() {
 
             if (dead.length) {
                 const mlLinks = (await mlLookup()).links;
+                // Heal youtube first so a dead youtubeMusic can co-derive from it.
+                const order = { youtube: 0 };
+                dead.sort((a, b) => (order[a[0]] ?? 1) - (order[b[0]] ?? 1));
                 for (const [platform, url] of dead) {
-                    const candidate = mlLinks[platform] || null;
+                    let candidate = mlLinks[platform] || null;
+                    let coderive = false;
+                    if (platform === 'youtube' && YT_KEY) {
+                        // real video via the Data API -- official, so cron-safe
+                        const v = await youtubeVideo(entry.title, entry.artist);
+                        if (v.id) candidate = ytUrl(v.id);
+                    } else if (platform === 'youtubeMusic') {
+                        // co-derive from the (now-healthy) youtube link, always
+                        // valid; flag it so a local --fix-youtube finds the Art Track
+                        const yid = vidId(entry.links.youtube);
+                        if (yid) {
+                            candidate = ytmUrl(yid);
+                            coderive = true;
+                        }
+                    }
                     if (candidate && candidate !== url && !(await isDead(candidate))) {
                         entry.links[platform] = candidate;
+                        if (coderive) {
+                            entry.coderived = entry.coderived || {};
+                            entry.coderived.youtubeMusic = true;
+                        } else if (entry.coderived) {
+                            delete entry.coderived[platform];
+                        }
                         healed++;
-                        console.log(`  ~ ${entry.title}: healed ${platform}`);
+                        console.log(
+                            `  ~ ${entry.title}: healed ${platform}${coderive ? ' (co-derived)' : ''}`
+                        );
                     } else {
                         delete entry.links[platform];
                         entry.deadLinks = entry.deadLinks || {};
@@ -532,6 +772,9 @@ async function main() {
                         console.log(`  - ${entry.title}: hid ${platform} (could not heal)`);
                     }
                 }
+                if (entry.coderived && Object.keys(entry.coderived).length === 0) {
+                    delete entry.coderived;
+                }
             }
             continue; // cron does liveness + heal + hide only
         }
@@ -543,9 +786,10 @@ async function main() {
         const needMusicLink = isrc && !musicLinked(entry.links) && fresh('musiclink');
         const needBandcamp = !entry.links.bandcamp && fresh('bandcamp');
         const needSoundcloud = !entry.links.soundcloud && fresh('soundcloud');
-        // One YouTube search fills both youtube and youtubeMusic (same video id),
-        // so run it whenever either is missing.
-        const needYouTube = (!entry.links.youtube || !entry.links.youtubeMusic) && fresh('youtube');
+        // youtube/youtubeMusic are reconciled by fixYouTube (real video vs Art
+        // Track). Here we only bootstrap a brand-new track that has neither; the
+        // `--fix-youtube` pass is what corrects existing ones.
+        const needYouTube = !entry.links.youtube && !entry.links.youtubeMusic && fresh('youtube');
 
         if (needMusicLink || needBandcamp || needSoundcloud || needYouTube) {
             touched++;
@@ -565,19 +809,11 @@ async function main() {
                 await sleep(500);
             }
             if (needYouTube) {
-                // Fill whichever of youtube / youtubeMusic is missing from the
-                // one search, without overwriting an existing (good) link.
-                const { ok, links } = await youtubeSearch(entry.title, entry.artist);
-                let added = false;
-                for (const k of ['youtube', 'youtubeMusic']) {
-                    if (!entry.links[k] && links[k]) {
-                        entry.links[k] = links[k];
-                        added = true;
-                    }
-                }
-                if (added) {
+                // Bootstrap a new track: resolve the real video + Art Track.
+                const changes = await fixYouTube(entry);
+                if (changes.length) {
                     if (entry.tried) delete entry.tried.youtube;
-                } else if (ok) {
+                } else {
                     entry.tried = entry.tried || {};
                     entry.tried.youtube = today();
                 }

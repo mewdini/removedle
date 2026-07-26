@@ -50,6 +50,7 @@ jobs:
               env:
                   DATA_DIR: ./out/data
                   MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
+                  YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
 
             # push-data-json pushes the data manifests only, not album art -- this
             # job touches links, never covers, so it needs no out/covers.

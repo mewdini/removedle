@@ -161,6 +161,7 @@ async function scanSongs() {
                     isrc: existingEntry?.isrc,
                     tried: existingEntry?.tried,
                     deadLinks: existingEntry?.deadLinks,
+                    coderived: existingEntry?.coderived,
                 };
 
                 const slug = albumName.toLowerCase().replace(/[^a-z0-9]/g, '-');

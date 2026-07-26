@@ -127,6 +127,7 @@ jobs:
                   OUTPUT_DIR: ./out/dailies
                   DATA_DIR: ./out/data
                   MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
+                  YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
