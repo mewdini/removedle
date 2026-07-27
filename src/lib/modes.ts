@@ -28,6 +28,12 @@ export interface ModeConfig {
     shareLabel: string;
     /** One-line description, used for the tagline and page metadata. */
     blurb: string;
+    /**
+     * Track the blurb quotes, cited under the tagline the same way the 404
+     * lines are (see ERROR_LINES in $lib/statics). Metadata gets the blurb
+     * alone, so the description stays a sentence rather than a citation.
+     */
+    blurbSong?: string;
 }
 
 export const MODES: Record<ModeId, ModeConfig> = {
@@ -49,7 +55,8 @@ export const MODES: Record<ModeId, ModeConfig> = {
         storagePrefix: 'challenger-',
         startDate: '2026-07-24',
         shareLabel: 'removedle challenger',
-        blurb: 'Leaks, demos, remixes and covers. For the deep cuts.',
+        blurb: "That challenger, who's already come this far, is going to face their final opponent",
+        blurbSong: 'Professional Vengeance',
     },
 };
 

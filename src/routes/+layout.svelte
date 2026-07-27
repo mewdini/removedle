@@ -23,13 +23,22 @@
     // /challenger link previews as the Challenger game rather than the main one.
     const mode = $derived(resolveMode(page.data.mode));
     const pageTitle = $derived(mode.id === MODES.normal.id ? NAME : `${NAME} · ${mode.label}`);
+    // A blurb can be a quote, so it carries no terminal punctuation of its own --
+    // joined with the same separator as the title rather than running the two
+    // sentences together in the link previews Discord and Slack render from it.
     const pageDescription = $derived(
-        mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurb} ${DESCRIPTION}`
+        mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurb} · ${DESCRIPTION}`
     );
     // The current page, not the mode root -- and built from page.url rather than
     // resolve(), which returns paths relative to the current route ('.',
     // '../challenger') and so cannot be concatenated onto an origin.
     const canonical = $derived(SITE + page.url.pathname);
+    // og:image/twitter:image have to be absolute: the Vite import resolves to a
+    // root-relative /_app/immutable path, which crawlers are not obliged to
+    // resolve against the page. Prefixed with SITE rather than the request
+    // origin for the same reason as canonical -- a preview shared from either
+    // host then points at the one origin. Not $derived: the import is static.
+    const previewImage = SITE + favicon128;
     let settings: AppSettings = $state({
         volume: 10,
         theme: 'dark',
@@ -97,20 +106,20 @@
     <!-- Google / Search Engine Tags -->
     <meta itemprop="name" content={pageTitle} />
     <meta itemprop="description" content={pageDescription} />
-    <meta itemprop="image" content={favicon128} />
+    <meta itemprop="image" content={previewImage} />
 
     <!-- Facebook Meta Tags -->
     <meta property="og:url" content={canonical} />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={pageDescription} />
-    <meta property="og:image" content={favicon128} />
+    <meta property="og:image" content={previewImage} />
 
     <!-- Twitter Meta Tags -->
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDescription} />
-    <meta name="twitter:image" content={favicon128} />
+    <meta name="twitter:image" content={previewImage} />
 
     <link rel="icon" href={SITE + '/favicon.png'} />
     <link rel="icon" type="image/png" sizes="32x32" href={favicon32} />

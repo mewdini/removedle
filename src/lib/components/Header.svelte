@@ -66,6 +66,9 @@
     <Logo class="text-[3.5rem] text-theme-text sm:text-[5.25rem]" />
     <span class="px-4 text-center">
         <p class="text-lg text-theme-text">{currentMode.blurb}</p>
+        {#if currentMode.blurbSong}
+            <p class="text-xs text-theme-muted italic">from “{currentMode.blurbSong}”</p>
+        {/if}
         <p class="text-sm text-theme-text">by mewdini</p>
     </span>
     <nav
