@@ -10,6 +10,7 @@
     } from 'flowbite-svelte-icons';
     import Modal from './Modal.svelte';
     import Logo from './Logo.svelte';
+    import StreamingLinks from './game/StreamingLinks.svelte';
     import { themes } from '$lib/themes';
     import { page } from '$app/state';
     import { MODE_LIST, modeParam, resolveMode, type ModeConfig } from '$lib/modes';
@@ -36,6 +37,12 @@
     }
 
     const currentMode = $derived(resolveMode(page.data.mode));
+    // Resolved server-side (see loadBlurbLinks) because the quoted track is an
+    // official release, so it is not in challenger's own catalog.
+    const blurbLinks = $derived(page.data.blurbLinks ?? {});
+    const hasBlurbLinks = $derived(
+        Object.values(blurbLinks).some((v: unknown) => typeof v === 'string' && v.trim())
+    );
 
     // The mode switcher is navigation, not a setting: the URL is the source of
     // truth, so these are plain anchors that work without JS and stay on the
@@ -65,10 +72,22 @@
          roughly 0.72em, hence 56px / 84px here. -->
     <Logo class="text-[3.5rem] text-theme-text sm:text-[5.25rem]" />
     <span class="px-4 text-center">
-        <p class="text-lg text-theme-text">{currentMode.blurb}</p>
-        {#if currentMode.blurbSong}
-            <p class="text-xs text-theme-muted italic">from “{currentMode.blurbSong}”</p>
-        {/if}
+        <!-- The citation runs on from the quote rather than taking a line of its
+             own, to keep the header stack short. A span rather than a p because
+             StreamingLinks renders a div, and the parser closes a p on one. -->
+        <span class="block text-lg text-theme-text">
+            {currentMode.blurb}
+            {#if currentMode.blurbSong}
+                <span
+                    class="inline-flex items-center gap-1.5 align-middle text-xs text-theme-muted italic [&_a]:h-4 [&_a]:w-4"
+                >
+                    from “{currentMode.blurbSong}”
+                    {#if hasBlurbLinks}
+                        <StreamingLinks links={blurbLinks} inGame={false} />
+                    {/if}
+                </span>
+            {/if}
+        </span>
         <p class="text-sm text-theme-text">by mewdini</p>
     </span>
     <nav

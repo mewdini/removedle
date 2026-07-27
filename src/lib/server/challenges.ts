@@ -1,6 +1,6 @@
-import type { DailyMeta, Song } from '$lib/interfaces';
+import type { DailyMeta, Song, StreamingLinks } from '$lib/interfaces';
 import { GUESSES_PER_ROUND, MAX_ROUNDS } from '$lib/statics';
-import { albumMapUrl, catalogUrl, metaUrl, type ModeConfig, type ModeId } from '$lib/modes';
+import { albumMapUrl, catalogUrl, metaUrl, MODES, type ModeConfig, type ModeId } from '$lib/modes';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { challengeStats } from './db/schema';
 import { and, eq, sql } from 'drizzle-orm';
@@ -50,6 +50,30 @@ export async function loadSongCatalog(fetchFn: typeof fetch, mode: ModeConfig): 
     const res = await fetchFn(catalogUrl(mode));
     if (!res.ok) throw new Error(`Failed to load ${mode.id} song catalog`);
     return res.json();
+}
+
+// Streaming links for the track a mode's blurb quotes, so the citation under the
+// tagline offers the same platform buttons the 404 line does. The quotes come
+// from official releases, so challenger -- whose catalog is leaks and demos --
+// has to fall back to normal's catalog to find one. Decorative, so a lookup that
+// fails returns no links and the citation renders as plain text.
+export async function loadBlurbLinks(
+    fetchFn: typeof fetch,
+    mode: ModeConfig,
+    songList: Song[]
+): Promise<StreamingLinks> {
+    if (!mode.blurbSong) return {};
+
+    const local = songList.find((s) => s.title === mode.blurbSong);
+    if (local) return local.links ?? {};
+
+    try {
+        const catalog = await loadSongCatalog(fetchFn, MODES.normal);
+        return catalog.find((s) => s.title === mode.blurbSong)?.links ?? {};
+    } catch (e) {
+        console.warn(`Failed to resolve blurb links for ${mode.id}:`, e);
+        return {};
+    }
 }
 
 export async function loadAlbumMap(fetchFn: typeof fetch, mode: ModeConfig): Promise<AlbumEntry[]> {

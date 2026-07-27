@@ -23,11 +23,11 @@
     // /challenger link previews as the Challenger game rather than the main one.
     const mode = $derived(resolveMode(page.data.mode));
     const pageTitle = $derived(mode.id === MODES.normal.id ? NAME : `${NAME} · ${mode.label}`);
-    // A blurb can be a quote, so it carries no terminal punctuation of its own --
-    // joined with the same separator as the title rather than running the two
-    // sentences together in the link previews Discord and Slack render from it.
+    // Both blurbs end in their own punctuation, so a plain space is enough to
+    // keep the two sentences apart in the link previews Discord and Slack build
+    // from this.
     const pageDescription = $derived(
-        mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurb} · ${DESCRIPTION}`
+        mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurb} ${DESCRIPTION}`
     );
     // The current page, not the mode root -- and built from page.url rather than
     // resolve(), which returns paths relative to the current route ('.',

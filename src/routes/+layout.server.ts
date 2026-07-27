@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import type { LayoutServerLoad } from './$types';
 import type { Song } from '$lib/interfaces';
-import { loadSongCatalog, loadAlbumMap } from '$lib/server/challenges';
+import { loadSongCatalog, loadAlbumMap, loadBlurbLinks } from '$lib/server/challenges';
 import { resolveMode } from '$lib/modes';
 import { ERROR_LINES } from '$lib/statics';
 
@@ -23,6 +23,7 @@ export const load: LayoutServerLoad = async ({ fetch, route, params }) => {
             ? null
             : ERROR_LINES[Math.floor(Math.random() * ERROR_LINES.length)];
         const errorSong = chosen ? songList.find((s: Song) => s.title === chosen.song) : undefined;
+        const blurbLinks = await loadBlurbLinks(fetch, mode, songList);
 
         return {
             // Only the id crosses the load boundary; components resolve it back
@@ -30,6 +31,7 @@ export const load: LayoutServerLoad = async ({ fetch, route, params }) => {
             mode: mode.id,
             songList,
             albums,
+            blurbLinks,
             errorLine: chosen && {
                 line: chosen.line,
                 song: chosen.song,

@@ -55,7 +55,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
         storagePrefix: 'challenger-',
         startDate: '2026-07-24',
         shareLabel: 'removedle challenger',
-        blurb: "That challenger, who's already come this far, is going to face their final opponent",
+        blurb: "That challenger, who's already come this far, is going to face their final opponent!",
         blurbSong: 'Professional Vengeance',
     },
 };
