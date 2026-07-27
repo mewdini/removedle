@@ -27,18 +27,37 @@ function Remove-LinkOrDir {
 }
 
 Remove-LinkOrDir "static/assets/art"
+Remove-LinkOrDir "static/assets/challenger/art"
 Remove-LinkOrDir "static/challenges"
 
-# Create Junctions
+# Create Junctions.
+#
+# static/challenges covers BOTH modes: out/dailies holds normal's days at its
+# root and each other mode nested under it (out/dailies/challenger/<date>),
+# mirroring the R2 key space so dev URLs match production exactly.
 cmd /c mklink /j static\assets\art out\covers
 cmd /c mklink /j static\challenges out\dailies
 
+if (Test-Path "out/challenger/covers") {
+    New-Item -ItemType Directory -Force -Path "static/assets/challenger"
+    cmd /c mklink /j static\assets\challenger\art out\challenger\covers
+}
+
 # Copy metadata manifests
-if (Test-Path "out/data/songs.json") {
-    Copy-Item "out/data/songs.json" "static/assets/songs.json"
+function Copy-Manifests {
+    param([string]$DataDir, [string]$Target)
+
+    if (-not (Test-Path $DataDir)) { return }
+    New-Item -ItemType Directory -Force -Path $Target | Out-Null
+
+    foreach ($name in @("songs.json", "covers.json")) {
+        if (Test-Path "$DataDir/$name") {
+            Copy-Item "$DataDir/$name" "$Target/$name"
+        }
+    }
 }
-if (Test-Path "out/data/covers.json") {
-    Copy-Item "out/data/covers.json" "static/assets/covers.json"
-}
+
+Copy-Manifests "out/data" "static/assets"
+Copy-Manifests "out/challenger/data" "static/assets/challenger"
 
 Write-Host "Local assets successfully linked!" -ForegroundColor Green

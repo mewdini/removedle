@@ -1,7 +1,8 @@
 <script lang="ts">
     import type { Guess, GuessStatus, Song } from '$lib/interfaces';
-    import { CHALLENGES_URL, MAX_ROUNDS, GUESSES_PER_ROUND, SITE } from '$lib/statics';
-    import { AngleLeftOutline, ShareNodesOutline } from 'flowbite-svelte-icons';
+    import { MAX_ROUNDS, GUESSES_PER_ROUND, SITE } from '$lib/statics';
+    import { MODES, modeParam, snippetUrl } from '$lib/modes';
+    import { AngleLeftOutline, AngleRightOutline, ShareNodesOutline } from 'flowbite-svelte-icons';
     import AlbumArt from './AlbumArt.svelte';
     import ResultIcon from './ResultIcon.svelte';
     import TimerLeft from './TimerLeft.svelte';
@@ -10,7 +11,7 @@
     import { calculatePoints, calculateRoundsCorrect } from '$lib/gameUtils';
     import StreamingLinks from './StreamingLinks.svelte';
 
-    const { day, isToday, date, songList, dailyMeta, gameState, player, globalData, stats } =
+    const { day, isToday, date, mode, songList, dailyMeta, gameState, player, globalData, stats } =
         $props();
     const SHARE_TEXT = 'Copy Score';
     let copyText = $state(SHARE_TEXT);
@@ -50,8 +51,10 @@
 
     async function copyResults() {
         const text: string[] = [];
+        // Mode-labelled, so a Normal and a Challenger score for the same day are
+        // not both pasted as "removedle #3". Normal's label is unchanged.
         text.push(
-            `removedle #${day} - ${points === MAX_ROUNDS * GUESSES_PER_ROUND ? '👑' : `${points}/${MAX_ROUNDS * GUESSES_PER_ROUND}${isToday && stats.currentStreak >= 3 ? ' - 🔥 ' + stats.currentStreak : ''}`}`
+            `${mode.shareLabel} #${day} - ${points === MAX_ROUNDS * GUESSES_PER_ROUND ? '👑' : `${points}/${MAX_ROUNDS * GUESSES_PER_ROUND}${isToday && stats.currentStreak >= 3 ? ' - 🔥 ' + stats.currentStreak : ''}`}`
         );
         text.push('');
 
@@ -160,7 +163,7 @@
                             {#if expandedSongs[i]}
                                 <div transition:slide={{ duration: 200 }} class="overflow-hidden">
                                     <div transition:fade={{ duration: 150 }} class="pt-0.5">
-                                        <StreamingLinks links={song.links} inGame={false} />
+                                        <StreamingLinks links={song?.links ?? {}} inGame={false} />
                                     </div>
                                 </div>
                             {/if}
@@ -170,7 +173,7 @@
                         {#each { length: GUESSES_PER_ROUND } as _, j (j)}
                             <ResultIcon
                                 status={gameState.roundGuesses[i][j]?.status}
-                                src={`${CHALLENGES_URL}/${date}/round-${i + 1}-guess-${j + 1}.opus`}
+                                src={snippetUrl(mode, date, i + 1, j + 1)}
                                 {player}
                             />
                         {/each}
@@ -227,9 +230,26 @@
             </button>
         </div>
     </div>
+    {#if mode.id === MODES.normal.id}
+        <!-- Links to the explicit date rather than /challenger, so finishing an
+             archive day sends you to the same day in the other mode. -->
+        <a
+            class="flex w-full max-w-[500px] flex-row items-center justify-center gap-2 rounded-xl border border-theme-accent bg-theme-accent/15 px-4 py-3 text-theme-text transition-all hover:bg-theme-accent/30 active:scale-[0.98]"
+            href={resolve('/[[mode=mode]]/[date=date]', {
+                mode: modeParam(MODES.challenger),
+                date,
+            })}
+        >
+            <span class="text-sm font-bold">Try {MODES.challenger.label} Mode</span>
+            <span class="hidden text-xs text-theme-muted sm:inline">
+                {MODES.challenger.blurb}
+            </span>
+            <AngleRightOutline class="h-4 w-4 shrink-0" />
+        </a>
+    {/if}
     <a
         class="flex flex-row items-center justify-center gap-0.5 text-theme-text hover:underline"
-        href={resolve('/archive')}
+        href={resolve('/[[mode=mode]]/archive', { mode: modeParam(mode) })}
     >
         <AngleLeftOutline class="h-4 w-4 shrink-0" />
         <p>{isToday ? 'Play past games' : 'Back to archive'}</p>

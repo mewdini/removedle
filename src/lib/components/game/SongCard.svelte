@@ -45,5 +45,5 @@
             <AngleRightOutline class="h-4 w-4 shrink-0 sm:h-5 sm:w-5" />
         </button>
     </div>
-    <StreamingLinks links={song.links} inGame={true} />
+    <StreamingLinks links={song?.links ?? {}} inGame={true} />
 </div>

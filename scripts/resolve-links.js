@@ -37,10 +37,26 @@
 //   --challenge=<date>       Scope to the songs in out/dailies/<date>/meta.json --
 //                            used to verify a day's challenge tracks before publish.
 //
+// Link policy (per mode, see scripts/lib/modes.js):
+//   permissive (normal)   the behaviour described above.
+//   strict (challenger)   the catalog is leaks, demos, remixes and covers. Few
+//                         have official uploads and some are not online at all,
+//                         so a plausible-but-wrong link is worse than no link --
+//                         it spoils the answer on the results screen. Under
+//                         strict, only authoritative sources auto-publish (ISRC
+//                         via MusicLink, the artist's own SoundCloud profile,
+//                         Bandcamp, a title+channel-matched YouTube video). A
+//                         loose match is NEVER written to `links`; it goes to
+//                         entry.needsReview for a human to accept or reject, and
+//                         nothing is ever co-derived. Songs that have been swept
+//                         and genuinely missed everywhere get entry.linksOptional
+//                         so "no links" stops being reported as a problem.
+//
 // This script owns ONLY the registry's link fields (links, deadLinks, tried,
-// isrc, coderived); scan-songs.js owns the master fields. They never write the
-// same keys, so the two can alternate on the shared registry -- provided each
-// starts from a fresh pull-data (pull-data before a scan or --verify, push after).
+// isrc, coderived, needsReview, rejectedLinks, linksOptional); scan-songs.js owns
+// the master fields. They never write the same keys, so the two can alternate on
+// the shared registry -- provided each starts from a fresh pull-data (pull-data
+// before a scan or --verify, push after).
 //
 // MUSICLINK_API_KEY + YOUTUBE_API_KEY come from .env (server-side only; never
 // client, never committed). ISRCs are read from the master files in out/masters.
@@ -51,12 +67,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as mm from 'music-metadata';
 import { encode } from '@msgpack/msgpack';
+import { modeDirs, parseMode } from './lib/modes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../out/data');
+
+const MODE = parseMode();
+const DIRS = modeDirs(MODE);
+const STRICT = MODE.linkPolicy === 'strict';
+
+const DATA_DIR = DIRS.data;
 // ISRC lives in the SOURCE files (masters/), not the converted out/masters/*.m4a
 // (ffmpeg drops the tag on FLAC -> m4a). Read the source by base name.
-const SRC_MASTERS_DIR = process.env.SRC_MASTERS_DIR || path.resolve(__dirname, '../masters');
+const SRC_MASTERS_DIR = DIRS.srcMasters;
 const REGISTRY_FILE = path.join(DATA_DIR, 'song-registry.json');
 const ISSUES_FILE = path.join(DATA_DIR, 'link-issues.json');
 // Client-facing catalog derived from the registry; `--verify` patches its links
@@ -77,7 +99,7 @@ const onlyArg = process.argv.find((a) => a.startsWith('--only='));
 const ONLY_IDS = onlyArg ? onlyArg.split('=')[1].split(',').filter(Boolean) : [];
 const challengeArg = process.argv.find((a) => a.startsWith('--challenge='));
 const CHALLENGE_DATE = challengeArg ? challengeArg.split('=')[1] : null;
-const DAILIES_DIR = process.env.OUTPUT_DIR || path.resolve(__dirname, '../out/dailies');
+const DAILIES_DIR = DIRS.dailies;
 
 // MusicLink link key -> the app's StreamingLinks key (src/lib/interfaces.ts)
 const ML_MAP = {
@@ -105,22 +127,100 @@ const musicLinked = (l) => !!(l.spotify || l.appleMusic || l.tidal || l.youtube)
 // A confirmed "no hit" for a source is stamped with the date on entry.tried[source]
 // so we stop re-querying it until it goes stale (in case the track appears later).
 const STALE_DAYS = 30;
+// How many of the artist's other names to re-query on YouTube when the primary
+// name finds nothing. SoundCloud is unmetered so it tries them all; the YouTube
+// Data API is not.
+const YT_ALIAS_ATTEMPTS = 3;
 const today = () => new Date().toISOString().slice(0, 10);
 function triedRecently(entry, source) {
     const d = entry.tried?.[source];
     if (!d) return false;
     return (Date.now() - new Date(d).getTime()) / 86400000 < STALE_DAYS;
 }
+// --- manual review queue (strict policy) ------------------------------------
+// A candidate that matches too loosely to publish is parked on
+// entry.needsReview[platform] until a human accepts it (moves the url into
+// entry.links) or rejects it (moves it into entry.rejectedLinks[platform], which
+// stops it ever being proposed again). scripts/link-review.js does both.
+const MAX_REVIEW_PER_PLATFORM = 5;
+
+function isRejected(entry, platform, url) {
+    return !!entry.rejectedLinks?.[platform]?.includes(url);
+}
+
+function recordReview(entry, candidates) {
+    for (const c of candidates) {
+        if (!c?.url || !c.platform) continue;
+        if (isRejected(entry, c.platform, c.url)) continue;
+        if (entry.links?.[c.platform]) continue;
+
+        entry.needsReview = entry.needsReview || {};
+        const list = (entry.needsReview[c.platform] = entry.needsReview[c.platform] || []);
+        if (list.some((existing) => existing.url === c.url)) continue;
+        if (list.length >= MAX_REVIEW_PER_PLATFORM) continue;
+        list.push({
+            url: c.url,
+            title: c.title || '',
+            uploader: c.uploader || '',
+            source: c.source || '',
+            seen: today(),
+        });
+    }
+}
+
+// A platform that now has a real link no longer needs triage.
+function clearReview(entry, platforms) {
+    if (!entry.needsReview) return;
+    for (const p of platforms) delete entry.needsReview[p];
+    if (Object.keys(entry.needsReview).length === 0) delete entry.needsReview;
+}
+
+// Never re-publish something a human already threw out.
+function dropRejected(entry, links) {
+    const kept = {};
+    for (const [platform, url] of Object.entries(links || {})) {
+        if (isRejected(entry, platform, url)) continue;
+        kept[platform] = url;
+    }
+    return kept;
+}
+
 // Run one source; merge any links found. On a genuine miss (ok with no links)
 // stamp entry.tried[source] with today's date. A failed request (ok:false) is
-// left unstamped so it retries on the next run.
+// left unstamped so it retries on the next run. Ambiguous candidates (strict
+// policy) come back as `review` and are queued rather than published -- they
+// still count as a confirmed miss for the purposes of the dated stamp, so the
+// source is not re-queried until the stamp goes stale.
 async function trySource(entry, source, fn) {
-    const { ok, links } = await fn();
-    if (links && Object.keys(links).length) {
-        Object.assign(entry.links, links);
+    const { ok, links, review } = await fn();
+    const offered = dropRejected(entry, links);
+
+    // FILL ONLY -- never replace a link that is already there. A source can
+    // return several platforms at once (MusicLink returns up to 7), so a call
+    // made to fill a missing `bandcamp` could otherwise silently overwrite a
+    // hand-picked `soundcloud` with whatever the API happened to have. Curated
+    // links are the whole point of the strict policy; nothing automatic may
+    // clobber them.
+    const publishable = {};
+    for (const [platform, url] of Object.entries(offered)) {
+        const existing = entry.links[platform];
+        if (typeof existing === 'string' && existing.trim()) continue;
+        publishable[platform] = url;
+    }
+
+    if (Object.keys(publishable).length) {
+        Object.assign(entry.links, publishable);
+        if (entry.tried) delete entry.tried[source];
+        clearReview(entry, Object.keys(publishable));
+        return true;
+    }
+    // The source did answer with something; it was just already covered. That is
+    // still a successful lookup, so clear any stale miss-marker.
+    if (Object.keys(offered).length) {
         if (entry.tried) delete entry.tried[source];
         return true;
     }
+    if (review?.length) recordReview(entry, review);
     if (ok) {
         entry.tried = entry.tried || {};
         entry.tried[source] = today();
@@ -168,13 +268,30 @@ async function musiclinkByIsrc(isrc) {
     // Retry once on an empty result: the first lookup of an unindexed ISRC can
     // return success with no links while it resolves, then fill on a second call.
     for (let attempt = 1; attempt <= 2; attempt++) {
-        const res = await fetchT(`https://api.ml.jadquir.com/v1/lookup/isrc/${isrc}`, {
-            headers: { Authorization: `Bearer ${ML_KEY}` },
-        });
+        let res;
+        try {
+            res = await fetchT(`https://api.ml.jadquir.com/v1/lookup/isrc/${isrc}`, {
+                headers: { Authorization: `Bearer ${ML_KEY}` },
+            });
+        } catch (e) {
+            // A timeout or socket error is a failed REQUEST, not a "no hit". Every
+            // other adapter honours that contract; this one used to let the
+            // exception escape, which aborted main() before it wrote the registry
+            // -- losing the whole run's work (and reddening the cron) because one
+            // API call was slow.
+            console.warn(`  musiclink: request failed for ${isrc} (${e.message})`);
+            return { ok: false, links: {} };
+        }
         if (res.status === 429) {
             await sleep(3000);
             continue;
         }
+        // 404 is this API's authoritative "no such track", not a failure: the
+        // ISRC is simply not in any streaming catalog. Return it as a confirmed
+        // miss so the caller records a dated stamp -- otherwise every run
+        // re-queries the same never-distributed track forever, burning the
+        // 300/mo cap. Unreleased material tagged with an ISRC hits this a lot.
+        if (res.status === 404) return { ok: true, links: {} };
         if (!res.ok) return { ok: false, links: {} };
 
         const body = await res.json().catch(() => null);
@@ -328,49 +445,373 @@ async function soundcloudCatalog() {
     }
 }
 
+// Re-uploads are titled every which way -- "jane remover - hermit",
+// "dltzk(jane remover) - scarecrow". Strip one leading "<something> - " so a
+// title can be compared on its own. Only the first separator is consumed.
+const stripArtistPrefix = (t) => {
+    const m = String(t || '').match(/^[^-—–]{1,40}\s+[-—–]\s+(.+)$/);
+    return m ? m[1] : String(t || '');
+};
+// Both spellings of a title, for matching in either direction.
+const titleKeys = (t) => [...new Set([norm(t), norm(stripArtistPrefix(t))])].filter(Boolean);
+
+// The title up to the first bracket/slash -- "ROBLOXCORE XD LOL!!! (feat. ...)"
+// and "ROBLOXCORE >:) - XD LOL!!! (PROD 4AM) !!" both reduce to "robloxcorexdlol".
+const primarySegment = (t) => String(t || '').split(/\s*[([/]/)[0];
+
+// Keys used to match against the CURATED archive accounts only. Wider than
+// titleKeys because re-uploads decorate titles freely -- different feature
+// credits, "(PROD X)", emoticons that fake an "artist - title" split. That width
+// is only safe because the account is already vetted and the key must still be
+// >= 6 chars, and every accepted result is confirmed by runtime afterwards.
+const MIN_ARCHIVE_KEY = 6;
+// A re-upload can differ by a second or two of silence; more than that and it is
+// a different take.
+const ARCHIVE_SECONDS_TOLERANCE = 4;
+// A truncated title has to share at least this much with ours before prefix
+// matching will consider it.
+const MIN_PREFIX_KEY = 14;
+// Same words in a different order -- our "Clairo Bags Cover" against an upload
+// titled "jane remover - bags [clairo cover]". Sorting the tokens makes those
+// compare equal. Only safe because an archive hit is additionally gated on the
+// source being vetted and on the runtime matching.
+const sortedTokenKey = (t) => {
+    const words = String(t || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .split(' ')
+        .filter(Boolean);
+    return words.length > 1 ? words.sort().join('') : '';
+};
+
+function archiveKeys(t) {
+    const raw = String(t || '');
+    const variants = [
+        raw,
+        stripArtistPrefix(raw),
+        primarySegment(raw),
+        primarySegment(stripArtistPrefix(raw)),
+    ];
+    const keys = variants.map(norm);
+    for (const v of variants) keys.push(sortedTokenKey(v));
+    return [...new Set(keys)].filter((k) => k.length >= MIN_ARCHIVE_KEY);
+}
+
+// Does `candidate` plausibly carry `title`? Substring containment is allowed --
+// re-uploads add "(feat. ...)", "[remix]" and so on -- but ONLY once the title is
+// long enough to be distinctive. A short title inside a longer one is almost
+// always a different song: searching "Help" under the `leroy` alias otherwise
+// matches "Help Yourself to Dub" by Leroy Smart and "People Help The People".
+const MIN_SUBSTRING_TITLE = 6;
+function titleCarries(candidate, title) {
+    const want = norm(title);
+    if (!want) return false;
+    const keys = titleKeys(candidate);
+    if (keys.some((k) => k === want)) return true;
+    if (want.length < MIN_SUBSTRING_TITLE) return false;
+    return keys.some((k) => k.includes(want));
+}
+
+// Every name this artist has released under, current name first. Empty for modes
+// that declare none, which keeps permissive behaviour byte-identical.
+const artistNames = (artist) => [artist, ...(MODE.artistAliases || [])].filter(Boolean);
+// Does this text credit the artist under ANY of their names?
+//
+// Matched on WORD boundaries, not raw substrings. Several aliases are ordinary
+// names ("leroy", "jamie"), and a substring test credits the artist for any
+// uploader who merely contains them -- "Kevin Le Roy" and "LeRoy - Untitled Long
+// Time" both matched the `leroy` alias that way. Tokenising keeps "le roy"
+// distinct from "leroy" while still ignoring punctuation and casing.
+const tokens = (s) =>
+    ` ${String(s || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()} `;
+const creditsArtist = (text, artist) => {
+    const t = tokens(text);
+    if (t.trim() === '') return false;
+    return artistNames(artist).some((a) => t.includes(tokens(a)));
+};
+
+// Catalog sweep over the mode's curated archive accounts (see modes.js). Most of
+// the strict catalog was never released, so the artist's own profile does not
+// have it and the only copies are archive re-uploads. Sweeping a hand-picked
+// allowlist -- rather than trusting whatever a search returns -- is what makes
+// these safe to publish: the account is vetted, and the title still has to match
+// exactly. Built once per run, like the official-profile and Bandcamp catalogs.
+let scArchiveCache = null;
+async function soundcloudArchiveCatalog() {
+    if (scArchiveCache) return scArchiveCache;
+    const map = new Map();
+    const accounts = MODE.archiveAccounts || [];
+    const playlists = MODE.archivePlaylists || [];
+    if (!accounts.length && !playlists.length) return (scArchiveCache = { ok: true, map, all: [] });
+
+    // Shared indexer so accounts and playlists agree on keying and precedence.
+    // Every candidate under a key, not just the first. Keeping only the first
+    // meant one bad early hit blocked a good later one: personalpalace's "the
+    // party i never had (mix 1)" claimed the key, so the closer "(mix 2)" from a
+    // playlist could never be considered.
+    const all = [];
+    const add = (t, source) => {
+        if (!t?.title || !t.permalink_url) return;
+        const rec = {
+            url: t.permalink_url,
+            account: source,
+            title: t.title,
+            // Seconds. The api-v2 track object carries this for free, and it is
+            // the only reliable way to tell an alternate take from the right one.
+            seconds: t.duration ? Math.round(t.duration / 1000) : null,
+        };
+        all.push(rec);
+        for (const key of archiveKeys(t.title)) {
+            if (!map.has(key)) map.set(key, []);
+            const list = map.get(key);
+            if (!list.some((c) => c.url === rec.url)) list.push(rec);
+        }
+    };
+
+    const cid = await soundcloudClientId();
+    if (!cid) {
+        console.warn('  soundcloud: no client_id -- skipping archive catalogs');
+        return (scArchiveCache = { ok: false, map, all: [] });
+    }
+
+    let reached = 0;
+    for (const account of accounts) {
+        try {
+            const rr = await fetchT(
+                `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(`https://soundcloud.com/${account}`)}&client_id=${cid}`,
+                { headers: { 'User-Agent': UA } }
+            );
+            if (!rr.ok) {
+                console.warn(`  soundcloud: archive ${account} resolve failed (HTTP ${rr.status})`);
+                continue;
+            }
+            const user = await rr.json().catch(() => null);
+            if (!user?.id) continue;
+            reached++;
+
+            let next = `https://api-v2.soundcloud.com/users/${user.id}/tracks?client_id=${cid}&limit=200&linked_partitioning=1`;
+            for (let pages = 0; next && pages < 6; pages++) {
+                const r = await fetchT(next, { headers: { 'User-Agent': UA } });
+                if (!r.ok) break;
+                const j = await r.json().catch(() => null);
+                if (!j) break;
+                // First source in the list wins, so ordering is preference order.
+                for (const t of j.collection || []) add(t, account);
+                next = j.next_href ? `${j.next_href}&client_id=${cid}` : null;
+                await sleep(250);
+            }
+            await sleep(300);
+        } catch (e) {
+            console.warn(`  soundcloud: archive ${account} errored (${e.message})`);
+        }
+    }
+
+    // Curated playlists. A playlist only hydrates its first few tracks, so the
+    // rest arrive as bare ids and have to be fetched in batches.
+    let playlistTracks = 0;
+    for (const url of playlists) {
+        try {
+            const pr = await fetchT(
+                `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(url)}&client_id=${cid}`,
+                { headers: { 'User-Agent': UA } }
+            );
+            if (!pr.ok) {
+                console.warn(`  soundcloud: playlist resolve failed (HTTP ${pr.status}) ${url}`);
+                continue;
+            }
+            const pl = await pr.json().catch(() => null);
+            if (!pl?.tracks) continue;
+            reached++;
+
+            for (const t of pl.tracks)
+                if (t.title) {
+                    add(t, 'playlist');
+                    playlistTracks++;
+                }
+            const missing = pl.tracks.filter((t) => !t.title).map((t) => t.id);
+            for (let i = 0; i < missing.length; i += 50) {
+                const r = await fetchT(
+                    `https://api-v2.soundcloud.com/tracks?ids=${missing.slice(i, i + 50).join(',')}&client_id=${cid}`,
+                    { headers: { 'User-Agent': UA } }
+                );
+                if (!r.ok) break;
+                for (const t of (await r.json().catch(() => [])) || []) {
+                    add(t, 'playlist');
+                    playlistTracks++;
+                }
+                await sleep(250);
+            }
+        } catch (e) {
+            console.warn(`  soundcloud: playlist errored (${e.message}) ${url}`);
+        }
+    }
+
+    console.log(
+        `  soundcloud: cataloged ${map.size} archive track title(s) from ${accounts.length} account(s) + ${playlists.length} playlist(s) (${playlistTracks} playlist tracks)`
+    );
+    // ok only if at least one account answered; otherwise a network problem must
+    // not be recorded as an authoritative "not on any archive".
+    return (scArchiveCache = { ok: reached > 0, map, all });
+}
+
 // Per-track search for the tail the profile can't cover -- deleted loosies and
 // covers that only survive as re-uploads on other accounts. Strong title match;
 // accept a non-official uploader since the originals are gone.
+//
+// Under the strict policy this NEVER auto-accepts: a search hit from an arbitrary
+// uploader is exactly the kind of confident-looking wrong link that ruins a
+// guessing game. Matches are returned as review candidates instead.
 async function soundcloudSearch(title, artist) {
     try {
         const cid = await soundcloudClientId();
         if (!cid) return { ok: false, links: {} };
-        const q = encodeURIComponent(`${artist} ${title}`);
-        const res = await fetchT(
-            `https://api-v2.soundcloud.com/search/tracks?q=${q}&client_id=${cid}&limit=15`,
-            { headers: { 'User-Agent': UA } }
-        );
-        if (!res.ok) return { ok: false, links: {} };
-        const j = await res.json().catch(() => null);
-        if (!j || !Array.isArray(j.collection)) return { ok: false, links: {} };
-        const hit = j.collection.find(
+
+        // One query per name the artist has released under. Re-uploads of older
+        // material are usually credited to the old name, so searching only the
+        // current one simply cannot find them.
+        const collected = new Map();
+        let anyOk = false;
+        for (const name of artistNames(artist)) {
+            const q = encodeURIComponent(`${name} ${title}`);
+            const res = await fetchT(
+                `https://api-v2.soundcloud.com/search/tracks?q=${q}&client_id=${cid}&limit=15`,
+                { headers: { 'User-Agent': UA } }
+            );
+            if (!res.ok) continue;
+            const j = await res.json().catch(() => null);
+            if (!j || !Array.isArray(j.collection)) continue;
+            anyOk = true;
+            for (const t of j.collection) {
+                if (t.permalink_url && !collected.has(t.permalink_url))
+                    collected.set(t.permalink_url, t);
+            }
+            await sleep(250);
+        }
+        if (!anyOk) return { ok: false, links: {} };
+
+        const matches = [...collected.values()].filter(
             (t) =>
-                t.permalink_url &&
-                norm(t.title).includes(norm(title)) &&
-                (norm(t.user?.username).includes(norm(artist)) ||
+                titleCarries(t.title, title) &&
+                (creditsArtist(t.user?.username, artist) ||
                     norm(t.user?.username).includes('janeremover') ||
-                    norm(t.title).includes(norm(artist)))
+                    creditsArtist(t.title, artist))
         );
-        return { ok: true, links: hit ? { soundcloud: hit.permalink_url } : {} };
+
+        if (STRICT) {
+            return {
+                ok: true,
+                links: {},
+                review: matches.slice(0, MAX_REVIEW_PER_PLATFORM).map((t) => ({
+                    platform: 'soundcloud',
+                    url: t.permalink_url,
+                    title: t.title,
+                    uploader: t.user?.username || '',
+                    source: 'soundcloud-search',
+                })),
+            };
+        }
+
+        return { ok: true, links: matches[0] ? { soundcloud: matches[0].permalink_url } : {} };
     } catch {
         return { ok: false, links: {} };
     }
 }
 
-// Try the official catalog first, then fall back to search. { ok:false } only if
-// BOTH the catalog failed to load and the search request failed, so a genuine
-// "not on SoundCloud" still records a dated miss.
-async function soundcloudLookup(title, artist) {
+// Try the official catalog first, then fall back to search. The catalog is the
+// artist's own profile, so an exact title match there is authoritative under both
+// policies. { ok:false } only if BOTH the catalog failed to load and the search
+// request failed, so a genuine "not on SoundCloud" still records a dated miss.
+async function soundcloudLookup(title, artist, seconds = null) {
     const cat = await soundcloudCatalog();
     if (cat.ok) {
         const url = cat.map.get(norm(title));
         if (url) return { ok: true, links: { soundcloud: url } };
     }
+
+    // Then the curated archive accounts (strict modes only). Exact title match
+    // on a vetted account is confident enough to publish; anything looser still
+    // falls through to the review queue below.
+    const arch = MODE.archiveAccounts?.length
+        ? await soundcloudArchiveCatalog()
+        : { ok: true, map: new Map() };
+    if (arch.ok) {
+        // Gather every candidate across every key, then take the best by
+        // runtime. Guards, all learned the hard way: the upload must credit the
+        // artist unless the whole title matched exactly (else "luxieluci -
+        // untitled (the 6)" answers for our "untitled"), and the runtime must
+        // agree (else "the party i never had (mix 1)" at 152s answers for our
+        // 142s version 2).
+        const seen = new Set();
+        const pool = [];
+        for (const key of archiveKeys(title)) {
+            for (const c of arch.map.get(key) || []) {
+                if (seen.has(c.url)) continue;
+                seen.add(c.url);
+                pool.push(c);
+            }
+        }
+
+        // Upload forms truncate long titles -- "Jane Remover - this is how y'all
+        // look with..." for a 91-character track. Exact keys can never match
+        // that, so fall back to prefix containment when nothing else hit. Still
+        // gated on credit + runtime below, and on a long enough prefix that it
+        // cannot be a coincidence.
+        if (!pool.length) {
+            const ours = titleKeys(title);
+            for (const c of arch.all || []) {
+                if (seen.has(c.url)) continue;
+                const theirs = titleKeys(c.title);
+                const hit = ours.some((a) =>
+                    theirs.some(
+                        (b) =>
+                            Math.min(a.length, b.length) >= MIN_PREFIX_KEY &&
+                            (a.startsWith(b) || b.startsWith(a))
+                    )
+                );
+                if (!hit) continue;
+                seen.add(c.url);
+                pool.push(c);
+            }
+        }
+
+        const viable = [];
+        for (const c of pool) {
+            const exact = titleKeys(c.title).some((k) => titleKeys(title).includes(k));
+            if (!exact && !creditsArtist(c.title, artist)) {
+                console.log(`      archive skip [${c.account}] "${c.title}" (not credited)`);
+                continue;
+            }
+            const delta = seconds && c.seconds ? Math.abs(c.seconds - seconds) : null;
+            if (delta !== null && delta > ARCHIVE_SECONDS_TOLERANCE) {
+                console.log(
+                    `      archive skip [${c.account}] "${c.title}" (${c.seconds}s vs ${seconds}s)`
+                );
+                continue;
+            }
+            viable.push({ ...c, delta });
+        }
+
+        if (viable.length) {
+            // Closest runtime wins; an unknown runtime sorts last.
+            viable.sort((a, b) => (a.delta ?? 1e9) - (b.delta ?? 1e9));
+            const best = viable[0];
+            console.log(
+                `      archive hit [${best.account}] "${best.title}"` +
+                    (best.delta !== null ? ` (${best.seconds}s vs ${seconds}s)` : '')
+            );
+            return { ok: true, links: { soundcloud: best.url } };
+        }
+    }
+
     const search = await soundcloudSearch(title, artist);
-    if (search.links.soundcloud) return search;
-    // Catalog loaded (an authoritative "not on the profile") OR search succeeded
-    // with no hit -> a real miss. Only report failure if nothing could be reached.
-    return { ok: cat.ok || search.ok, links: {} };
+    if (search.links?.soundcloud) return search;
+    // A catalog loaded (an authoritative "not there") OR search succeeded with no
+    // hit -> a real miss. Only report failure if nothing could be reached.
+    return { ok: cat.ok || arch.ok || search.ok, links: {}, review: search.review };
 }
 
 // --- YouTube + YouTube Music (resolved SEPARATELY) --------------------------
@@ -406,16 +847,29 @@ async function oembedInfo(id) {
 // skips "- Topic" Art Tracks (those are the youtubeMusic side). Falls back to the
 // youtube.com scrape when no key is set. Returns { ok, id }.
 async function youtubeVideo(title, artist) {
-    if (!YT_KEY) return youtubeScrapeVideo(title, artist);
+    // The keyless fallback is a page scrape with no channel verification, which
+    // is far too loose to publish from under the strict policy.
+    if (!YT_KEY) return STRICT ? { ok: false, id: null } : youtubeScrapeVideo(title, artist);
+    const review = [];
+    // A non-OK response is usually the daily quota (403), not "no such video".
+    // Without this the caller records a dated miss and stops asking for 30 days
+    // -- so one exhausted afternoon silently freezes YouTube resolution.
+    let apiFailed = false;
     // One search attempt for a given query string. `lastResort` allows the old
     // "first non-Topic result" fallback; the retry below sets it false so a
     // simplified query can only ever return a strict full-title match.
-    const attempt = async (queryTitle, lastResort) => {
-        const q = encodeURIComponent(`${artist} ${queryTitle}`);
+    const attempt = async (queryTitle, lastResort, queryArtist = artist) => {
+        const q = encodeURIComponent(`${queryArtist} ${queryTitle}`);
         const res = await fetchT(
             `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=15&q=${q}&key=${YT_KEY}`
         );
-        if (!res.ok) return null;
+        if (!res.ok) {
+            if (res.status === 403 || res.status === 429) {
+                console.warn(`  youtube: Data API refused (HTTP ${res.status}) -- quota?`);
+            }
+            apiFailed = true;
+            return null;
+        }
         const j = await res.json();
         const items = (j.items || [])
             .map((it) => ({
@@ -426,7 +880,28 @@ async function youtubeVideo(title, artist) {
             .filter((x) => x.id && !isTopic(x.ch));
         // Acceptance is ALWAYS against the full title, never the simplified query,
         // so a shorter query can never let a different song through.
-        const titled = items.filter((x) => norm(x.title).includes(norm(title)));
+        const titled = items.filter((x) => titleCarries(x.title, title));
+
+        // Strict: the video's channel must also be the artist. A title match
+        // alone is how a fan re-upload, a lyric video of a different song, or a
+        // "type beat" ends up published as the answer. Everything that matched
+        // the title but not the channel goes to review instead.
+        if (STRICT) {
+            // "The channel is the artist" has to mean any of their names, or
+            // every upload credited to the old one is discarded unseen.
+            const own = titled.filter((x) => creditsArtist(x.ch, artist));
+            for (const x of titled.filter((x) => !own.includes(x))) {
+                review.push({
+                    platform: 'youtube',
+                    url: ytUrl(x.id),
+                    title: x.title,
+                    uploader: x.ch,
+                    source: 'youtube-search',
+                });
+            }
+            return own.find((x) => norm(x.ch) === norm(artist))?.id || own[0]?.id || null;
+        }
+
         const best =
             titled.find((x) => norm(x.ch) === norm(artist)) ||
             titled.find((x) => norm(x.ch).includes(norm(artist))) ||
@@ -435,7 +910,8 @@ async function youtubeVideo(title, artist) {
         return best?.id || null;
     };
     try {
-        let id = await attempt(title, true);
+        // lastResort ("just take the first result") is never allowed under strict.
+        let id = await attempt(title, !STRICT);
         if (!id) {
             // Multi-part titles ("A / B") and parenthetical suffixes can make the
             // search itself return nothing; retry on the primary segment. The full
@@ -444,7 +920,24 @@ async function youtubeVideo(title, artist) {
             const primary = title.split(/\s*[/(]/)[0].trim();
             if (primary && norm(primary) !== norm(title)) id = await attempt(primary, false);
         }
-        return { ok: true, id };
+        // Still nothing: re-query under the artist's other names. The full title
+        // must still appear in the matched video, so a wider query can only
+        // surface the same song credited differently, never a different song.
+        // Costs one Data API search per alias, so it only runs on a real miss.
+        if (!id) {
+            // Capped: each alias is a whole Data API search (100 units against a
+            // ~100-searches/day quota), and this fires on every track that is
+            // still missing. The list is ordered by era, so the first few are the
+            // ones this catalog is actually likely to be credited to.
+            for (const alias of (MODE.artistAliases || []).slice(0, YT_ALIAS_ATTEMPTS)) {
+                if (apiFailed) break;
+                id = await attempt(title, false, alias);
+                if (id) break;
+            }
+        }
+        // A failed request is NOT a confirmed "not on YouTube" -- leave it
+        // unstamped so the next run retries.
+        return { ok: !apiFailed, id, review: id ? [] : review };
     } catch {
         return { ok: false, id: null };
     }
@@ -563,6 +1056,10 @@ async function ytmArtTrack(title, artist) {
 // later run retries. Returns change tags for logging.
 async function fixYouTube(entry) {
     const changes = [];
+    // Whether the underlying lookups actually got answers. A quota-blocked or
+    // otherwise failed request must not be reported to the caller as "checked
+    // and found nothing", or the caller stamps a dated miss and stops asking.
+    let ok = true;
     const flag = (p) => {
         entry.coderived = entry.coderived || {};
         entry.coderived[p] = true;
@@ -571,7 +1068,21 @@ async function fixYouTube(entry) {
         if (entry.coderived) delete entry.coderived[p];
     };
     const set = (p, url, tag) => {
-        if (entry.links[p] !== url) {
+        const current = entry.links[p];
+        // Same video, different URL shape -> keep what is already there. This
+        // pass normalises links to a bare watch?v=<id>, which would strip a
+        // deliberate `&t=` timestamp -- and for a track that only exists inside
+        // a DJ set (eat my dust sits at 17:44 of a 20:00 mix under a completely
+        // different name) the timestamp is the entire value of the link.
+        if (
+            typeof current === 'string' &&
+            current.trim() &&
+            vidId(current) &&
+            vidId(current) === vidId(url)
+        ) {
+            return;
+        }
+        if (current !== url) {
             entry.links[p] = url;
             changes.push(tag);
         }
@@ -590,10 +1101,14 @@ async function fixYouTube(entry) {
         unflag('youtube');
     } else {
         const v = await youtubeVideo(entry.title, entry.artist);
+        if (v.ok === false) ok = false;
         if (v.id) {
             set('youtube', ytUrl(v.id), `youtube=${v.id}`);
             unflag('youtube');
-        } else if (cur) {
+            clearReview(entry, ['youtube']);
+        } else if (v.review?.length) {
+            recordReview(entry, v.review);
+        } else if (cur && !STRICT) {
             set('youtube', ytUrl(cur), 'youtube~coderived');
             flag('youtube');
         }
@@ -605,20 +1120,24 @@ async function fixYouTube(entry) {
         unflag('youtubeMusic');
     } else {
         const a = await ytmArtTrack(entry.title, entry.artist);
+        if (a.ok === false) ok = false;
         if (a.id) {
             set('youtubeMusic', ytmUrl(a.id), `ytmusic=${a.id}`);
             unflag('youtubeMusic');
-        } else {
+        } else if (!STRICT) {
             const yid = vidId(entry.links.youtube) || cur;
             if (yid) {
                 set('youtubeMusic', ytmUrl(yid), 'ytmusic~coderived');
                 flag('youtubeMusic');
             }
         }
+        // Strict: no co-derivation. Presenting a fan re-upload as the official
+        // "- Topic" Art Track is precisely the wrong-link this policy exists to
+        // prevent, so the platform is simply left unset.
     }
 
     if (entry.coderived && Object.keys(entry.coderived).length === 0) delete entry.coderived;
-    return changes;
+    return { changes, ok };
 }
 
 // --- link liveness (for --verify) ------------------------------------------
@@ -667,6 +1186,9 @@ async function main() {
     let healed = 0;
     let hidden = 0;
     let touched = 0;
+    let review = 0;
+
+    console.log(`Mode: ${MODE.id} (link policy: ${MODE.linkPolicy})`);
 
     // Optional scoping to a subset of songs (e.g. one day's challenge tracks).
     let only = ONLY_IDS.length ? new Set(ONLY_IDS) : null;
@@ -687,7 +1209,7 @@ async function main() {
         for (const [id, entry] of Object.entries(registry)) {
             if (only && !only.has(id)) continue;
             entry.links = entry.links || {};
-            const changes = await fixYouTube(entry);
+            const { changes } = await fixYouTube(entry);
             if (changes.length) {
                 n++;
                 console.log(`  ~ ${entry.title}: ${changes.join(', ')}`);
@@ -749,7 +1271,13 @@ async function main() {
                 for (const [platform, url] of dead) {
                     let candidate = mlLinks[platform] || null;
                     let coderive = false;
-                    if (platform === 'youtube' && YT_KEY) {
+                    // Strict: heal from MusicLink (ISRC) only. A search-based or
+                    // co-derived replacement is a guess, and silently swapping in
+                    // a guess is worse than showing nothing -- so anything that
+                    // cannot be healed authoritatively is hidden below.
+                    if (STRICT) {
+                        // no search-based or co-derived healing
+                    } else if (platform === 'youtube' && YT_KEY) {
                         // real video via the Data API -- official, so cron-safe
                         const v = await youtubeVideo(entry.title, entry.artist);
                         if (v.id) candidate = ytUrl(v.id);
@@ -821,31 +1349,48 @@ async function main() {
             }
             if (needSoundcloud) {
                 await trySource(entry, 'soundcloud', () =>
-                    soundcloudLookup(entry.title, entry.artist)
+                    soundcloudLookup(entry.title, entry.artist, Math.round(entry.duration || 0))
                 );
                 await sleep(500);
             }
             if (needYouTube) {
                 // Bootstrap a new track: resolve the real video + Art Track.
-                const changes = await fixYouTube(entry);
+                const { changes, ok } = await fixYouTube(entry);
                 if (changes.length) {
                     if (entry.tried) delete entry.tried.youtube;
-                } else {
+                } else if (ok) {
                     entry.tried = entry.tried || {};
                     entry.tried.youtube = today();
                 }
+                // else: the lookup itself failed (quota/network) -- leave it
+                // unstamped so the next run asks again instead of writing off
+                // the track for STALE_DAYS.
                 await sleep(500);
             }
 
             if (Object.keys(entry.links).length > before) {
                 resolved++;
                 console.log(`  + ${entry.title}: ${Object.keys(entry.links).join(', ')}`);
-            } else if (!hasLinks(entry.links)) {
+            } else if (!hasLinks(entry.links) && !(STRICT && !isrc)) {
+                // Under strict, a track with no ISRC and no hits is the expected
+                // outcome, not an issue -- it is marked linksOptional below.
                 issues.push({
                     id,
                     title: entry.title,
                     reason: isrc ? 'all-sources-missed' : 'no-isrc-all-sources-missed',
                     isrc: isrc || undefined,
+                });
+            }
+
+            for (const [platform, list] of Object.entries(entry.needsReview || {})) {
+                if (!list.length) continue;
+                review++;
+                issues.push({
+                    id,
+                    title: entry.title,
+                    platform,
+                    url: list[0].url,
+                    reason: 'needs-review',
                 });
             }
         }
@@ -858,13 +1403,37 @@ async function main() {
             }
             if (Object.keys(entry.deadLinks).length === 0) delete entry.deadLinks;
         }
+
+        // A platform that now has a link no longer needs triage.
+        if (entry.needsReview) clearReview(entry, Object.keys(entry.links));
+
+        // "Zero links is expected here." Set once every APPLICABLE source has been
+        // asked and confirmed it has nothing (a dated stamp means a real answer;
+        // a failed request leaves no stamp, so a flaky run can never silence a
+        // track). link-issues.js then stops reporting it, which is what keeps the
+        // rolling link-health issue from permanently listing 40-odd unreleased
+        // tracks that were never online to begin with.
+        //
+        // Deliberately per-entry rather than per-mode: a track whose sources have
+        // NOT all answered still gets flagged, and a track that had links and lost
+        // them produces deadLinks, which are reported regardless of this marker.
+        // Stamps expire after STALE_DAYS, so every source is re-asked periodically
+        // and the flag clears the moment something turns up.
+        if (STRICT) {
+            const sources = ['bandcamp', 'soundcloud', 'youtube'];
+            if (isrc) sources.push('musiclink');
+            const swept = sources.every((s) => entry.tried?.[s]);
+            if (swept && !hasLinks(entry.links)) entry.linksOptional = true;
+            else delete entry.linksOptional;
+        }
     }
 
     await fs.writeFile(REGISTRY_FILE, JSON.stringify(registry, null, 2));
     await fs.writeFile(ISSUES_FILE, JSON.stringify(issues, null, 2));
     await syncCatalogLinks(registry);
     console.log(
-        `\nresolved ${resolved} | checked ${checked} | healed ${healed} | hidden ${hidden} | ${issues.length} issue(s) -> ${ISSUES_FILE}`
+        `\nresolved ${resolved} | checked ${checked} | healed ${healed} | hidden ${hidden} | ` +
+            `${review} awaiting review | ${issues.length} issue(s) -> ${ISSUES_FILE}`
     );
 }
 

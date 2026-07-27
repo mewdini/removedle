@@ -63,14 +63,30 @@ jobs:
                       out/data
                       out/masters
                       out/covers
+                      out/challenger/data
+                      out/challenger/masters
+                      out/challenger/covers
                   key: removedle-cache-${{ github.run_id }}
                   restore-keys: removedle-cache-
 
+            # Every mode shares the same buckets, separated by key prefix, so each
+            # pull excludes the other modes' prefixes (see scripts/sync-r2.js).
+            # Without that, normal's pull would drag challenger/* into out/data and
+            # normal's next push -- which overwrites wholesale -- would re-upload a
+            # stale copy, silently reverting challenger's link heals and hides.
+            # Deliberately NOT gated on a cache miss. restore-keys matches any
+            # older cache by prefix, including ones saved before a mode existed --
+            # those restore only the paths they held, so the new mode's registry
+            # would be missing while the cache still counted as "hit" and skipped
+            # this step, and generate would die with "No registry found". Pulling
+            # every run is cheap anyway: syncPull skips any object whose size
+            # already matches locally, so a warm cache downloads almost nothing.
             - name: Pull Masters & Data from R2
-              if: steps.cache-restore.outputs.cache-matched-key == ''
               run: |
                   node scripts/sync-r2.js pull-masters
                   node scripts/sync-r2.js pull-data
+                  node scripts/sync-r2.js pull-masters --mode=challenger
+                  node scripts/sync-r2.js pull-data --mode=challenger
               env:
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -87,12 +103,18 @@ jobs:
                   # catalog, so nothing consumes this file anymore.
                   : > generated-dates.txt
 
+                  # Every mode gets its own challenge for the same date.
+                  generate_all() {
+                      node scripts/generate-daily.js "$1"
+                      node scripts/generate-daily.js --mode=challenger "$1"
+                  }
+
                   if [ -n "$START_DATE" ] && [ -n "$END_DATE" ]; then
                       echo "Generating range: $START_DATE to $END_DATE"
                       CURRENT="$START_DATE"
                       while [[ "$CURRENT" < "$END_DATE" || "$CURRENT" == "$END_DATE" ]]; do
                           echo "Processing $CURRENT..."
-                          node scripts/generate-daily.js "$CURRENT"
+                          generate_all "$CURRENT"
                           echo "$CURRENT" >> generated-dates.txt
                           CURRENT=$(date -I -d "$CURRENT + 1 day")
                       done
@@ -101,13 +123,16 @@ jobs:
                           TARGET_DATE=$(date -d "tomorrow" +%Y-%m-%d)
                       fi
                       echo "Generating for date: $TARGET_DATE"
-                      node scripts/generate-daily.js "$TARGET_DATE"
+                      generate_all "$TARGET_DATE"
                       echo "$TARGET_DATE" >> generated-dates.txt
                   fi
               env:
-                  MASTERS_DIR: ./out/masters
-                  DATA_DIR: ./out/data
-                  OUTPUT_DIR: ./out/dailies
+                  # No MASTERS_DIR/DATA_DIR/OUTPUT_DIR here: they already equal the
+                  # script defaults, and a dir override that does not name the mode
+                  # is refused outright (scripts/lib/modes.js) -- that guard is what
+                  # stops a stray DATA_DIR making a challenger run rewrite normal's
+                  # registry and destroy its permanent song IDs.
+                  #
                   # Needed since the challenges bucket went private: the generator
                   # reads the previous days' meta.json over the S3 API to avoid
                   # repeating songs. Without these it throws instead of silently
@@ -122,7 +147,9 @@ jobs:
             # verify below -- putting it first means a slow or failing link sweep can
             # never delay or block the audio.
             - name: Push Snippets to R2
-              run: node scripts/sync-r2.js push-challenges
+              run: |
+                  node scripts/sync-r2.js push-challenges
+                  node scripts/sync-r2.js push-challenges --mode=challenger
               env:
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -145,7 +172,25 @@ jobs:
                   pnpm links --verify
                   node scripts/sync-r2.js push-data-json
               env:
-                  DATA_DIR: ./out/data
+                  MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
+                  YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Same sweep for challenger, but under the strict link policy: dead
+            # links heal from MusicLink (ISRC) only, never from a search, and
+            # anything that cannot be healed authoritatively is hidden rather than
+            # replaced with a guess. Only 3 challenger tracks carry an ISRC, so
+            # this costs at most 3 MusicLink calls against the 300/mo cap.
+            - name: Verify, heal & hide links (challenger)
+              id: verify_links_challenger
+              continue-on-error: true
+              run: |
+                  node scripts/sync-r2.js pull-data --mode=challenger
+                  node scripts/resolve-links.js --mode=challenger --verify
+                  node scripts/sync-r2.js push-data-json --mode=challenger
+              env:
                   MUSICLINK_API_KEY: ${{ secrets.MUSICLINK_API_KEY }}
                   YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -158,13 +203,17 @@ jobs:
             # of hiding behind a green run. The next daily run re-verifies everything,
             # so a single miss is never fatal.
             - name: Flag failed link verification
-              if: steps.verify_links.outcome == 'failure'
+              if: steps.verify_links.outcome == 'failure' || steps.verify_links_challenger.outcome == 'failure'
               run: |
-                  echo "::warning title=Link verification failed::The link sweep errored this run, so streaming links were not verified/healed. The challenge audio still published; the next daily run re-verifies."
+                  FAILED=""
+                  [ "${{ steps.verify_links.outcome }}" = "failure" ] && FAILED="normal"
+                  [ "${{ steps.verify_links_challenger.outcome }}" = "failure" ] && FAILED="${FAILED:+$FAILED, }challenger"
+
+                  echo "::warning title=Link verification failed::The link sweep errored this run for: $FAILED. Those streaming links were not verified/healed. The challenge audio still published; the next daily run re-verifies."
                   {
-                      echo "### ⚠️ Link verification failed"
+                      echo "### ⚠️ Link verification failed ($FAILED)"
                       echo ""
-                      echo "The link sweep errored this run, so streaming links were not verified or healed. The challenge audio published normally, and the next daily run is the backstop. See the *Verify, heal & hide links* step log for the exception."
+                      echo "The link sweep errored this run, so streaming links were not verified or healed for: $FAILED. The challenge audio published normally, and the next daily run is the backstop. See the *Verify, heal & hide links* step logs for the exception."
                   } >> "$GITHUB_STEP_SUMMARY"
 
             # Machine-readable snapshot of what still needs a human, from the registry
@@ -175,9 +224,7 @@ jobs:
             # failure here must never red the run that just published the challenge.
             - name: Build link-health report
               continue-on-error: true
-              run: node scripts/link-issues.js --json > link-issues-report.json
-              env:
-                  DATA_DIR: ./out/data
+              run: node scripts/link-issues.js --json --modes=normal,challenger > link-issues-report.json
 
             # Maintain ONE rolling "link-health" issue: update it while anything is
             # hidden/missing, auto-close it when everything is healthy again. No
@@ -192,7 +239,7 @@ jobs:
                   script: |
                       const fs = require('fs');
                       try {
-                          const { dead, empty } = JSON.parse(fs.readFileSync('link-issues-report.json', 'utf8'));
+                          const { modes } = JSON.parse(fs.readFileSync('link-issues-report.json', 'utf8'));
                           const LABEL = 'link-health';
                           const TITLE = 'Streaming links needing attention';
 
@@ -200,7 +247,16 @@ jobs:
                               ...context.repo, labels: LABEL, state: 'open',
                           })).data[0];
 
-                          if (!dead.length && !empty.length) {
+                          // Nothing dead, nothing unexpectedly empty and nothing
+                          // awaiting triage, in ANY mode. Note `empty` already
+                          // excludes tracks marked linksOptional -- under the strict
+                          // policy a leak that was swept and found nowhere is the
+                          // expected state, not a problem to reopen this every night.
+                          const actionable = Object.values(modes).some(
+                              (m) => m.dead.length || m.empty.length || m.review.length
+                          );
+
+                          if (!actionable) {
                               if (open) {
                                   await github.rest.issues.createComment({
                                       ...context.repo, issue_number: open.number,
@@ -214,17 +270,33 @@ jobs:
                           }
 
                           let body = 'Maintained automatically by `daily-challenges.yml` (rewritten each run).\n\n';
-                          if (dead.length) {
-                              body += `## Dead links hidden from players (${dead.length})\n\n`;
-                              body += '| Song | Platform | URL | Dead since |\n|---|---|---|---|\n';
-                              for (const d of dead) body += `| ${d.title} | ${d.platform} | ${d.url} | ${d.since} |\n`;
-                              body += '\n';
+
+                          for (const [id, m] of Object.entries(modes)) {
+                              if (!m.dead.length && !m.empty.length && !m.review.length) continue;
+                              body += `## ${id}\n\n`;
+
+                              if (m.dead.length) {
+                                  body += `### Dead links hidden from players (${m.dead.length})\n\n`;
+                                  body += '| Song | Platform | URL | Dead since |\n|---|---|---|---|\n';
+                                  for (const d of m.dead) body += `| ${d.title} | ${d.platform} | ${d.url} | ${d.since} |\n`;
+                                  body += '\n';
+                              }
+                              if (m.empty.length) {
+                                  body += `### Songs with no links at all (${m.empty.length})\n\n`;
+                                  for (const e of m.empty) body += `- ${e.title} (\`${e.id}\`)\n`;
+                                  body += '\n';
+                              }
+                              if (m.optionalEmpty?.length) {
+                                  body += `_${m.optionalEmpty.length} further track(s) were swept and found nowhere online — expected for this catalog, not reported._\n\n`;
+                              }
+                              if (m.review.length) {
+                                  body += `### Candidates awaiting review (${m.review.length})\n\n`;
+                                  body += '| Song | Platform | Candidate | Uploader | URL |\n|---|---|---|---|---|\n';
+                                  for (const c of m.review) body += `| ${c.title} | ${c.platform} | ${c.candidate} | ${c.uploader || '?'} | ${c.url} |\n`;
+                                  body += `\nAccept or reject with \`pnpm links:review --mode=${id} --list\`.\n\n`;
+                              }
                           }
-                          if (empty.length) {
-                              body += `## Songs with no links at all (${empty.length})\n\n`;
-                              for (const e of empty) body += `- ${e.title} (\`${e.id}\`)\n`;
-                              body += '\n';
-                          }
+
                           body += 'Recover with a local `pnpm links` (full scrapers), or hand-add the URL to the song in the registry, then `pnpm scan` + push-data.';
 
                           try {

@@ -2,9 +2,9 @@ import { dev } from '$app/environment';
 
 const MAX_ROUNDS = 5;
 const GUESSES_PER_ROUND = 3;
-// Day 1. The site went live on this date; earlier dates were test data and are
-// rejected by the date routes rather than merely hidden from the archive.
-const START_DATE_STRING = '2026-07-24';
+// Day 1 is per mode and lives on the mode config (`startDate` in $lib/modes).
+// It is deliberately NOT duplicated here: a second copy would look
+// authoritative while being ignored by every date route and archive listing.
 const ASSETS_URL = dev ? '/assets' : 'https://assets.removedle.org';
 // Always same-origin: challenge media is served by src/routes/challenges/[date]/[file],
 // which gates future dates. It must never point at a public bucket, as that would
@@ -38,7 +38,6 @@ const SITE = 'https://removedle.org';
 export {
     MAX_ROUNDS,
     GUESSES_PER_ROUND,
-    START_DATE_STRING,
     ASSETS_URL,
     CHALLENGES_URL,
     ERROR_LINES,

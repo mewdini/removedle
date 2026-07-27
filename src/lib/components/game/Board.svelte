@@ -1,11 +1,13 @@
 <script lang="ts">
     import type { Song } from '$lib/interfaces';
-    import { CHALLENGES_URL, GUESSES_PER_ROUND, MAX_ROUNDS } from '$lib/statics';
+    import { GUESSES_PER_ROUND, MAX_ROUNDS } from '$lib/statics';
+    import { snippetUrl } from '$lib/modes';
     import AudioCard from './AudioCard.svelte';
     import SongCard from './SongCard.svelte';
     const {
         day,
         date,
+        mode,
         songList,
         gameState,
         dailyMeta,
@@ -62,7 +64,7 @@
             isActive={i <= gameState.roundGuesses[gameState.currentRound].length}
             guesses={gameState.roundGuesses[gameState.currentRound]}
             result={gameState.roundStatuses[gameState.currentRound] || null}
-            src={`${CHALLENGES_URL}/${date}/round-${gameState.currentRound + 1}-guess-${i + 1}.opus`}
+            src={snippetUrl(mode, date, gameState.currentRound + 1, i + 1)}
             {searcher}
             {submitGuess}
             {player}

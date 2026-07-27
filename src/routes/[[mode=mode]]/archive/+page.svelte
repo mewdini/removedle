@@ -3,15 +3,19 @@
     import type { ArchiveEntry } from '$lib/interfaces.js';
     import { onMount } from 'svelte';
     import { SvelteSet } from 'svelte/reactivity';
+    import { gameStorageKey, modeParam, resolveMode } from '$lib/modes';
     const { data } = $props();
 
+    const mode = $derived(resolveMode(data.mode));
     const todayEntry = $derived(data.archiveEntries[0] ?? null);
     const pastEntries = $derived(data.archiveEntries.slice(1));
     const clearedDates = new SvelteSet<string>();
 
     onMount(() => {
+        // Progress is stored per mode, so this only strikes through days cleared
+        // in the mode being viewed.
         for (const entry of data.archiveEntries as ArchiveEntry[]) {
-            const saved = localStorage.getItem(`removedle-${entry.date}`);
+            const saved = localStorage.getItem(gameStorageKey(mode, entry.date));
             if (!saved) continue;
 
             try {
@@ -31,7 +35,7 @@
 </script>
 
 <div class="flex w-full flex-col items-center gap-3 px-2 text-theme-text">
-    <h1 class="text-3xl font-bold">Archive</h1>
+    <h1 class="text-3xl font-bold">{mode.label} Archive</h1>
 
     {#if todayEntry}
         <div class="flex w-full flex-col gap-2">
@@ -39,7 +43,10 @@
                 >Today's Challenge</span
             >
             <a
-                href={resolve(`/${todayEntry.date}`)}
+                href={resolve('/[[mode=mode]]/[date=date]', {
+                    mode: modeParam(mode),
+                    date: todayEntry.date,
+                })}
                 class="flex w-full flex-col items-center justify-center rounded-xl border border-theme-text p-6 transition-all hover:bg-theme-card active:scale-[0.98]"
             >
                 <span class="text-xs tracking-widest text-theme-muted uppercase"
@@ -63,7 +70,10 @@
             >
                 {#each pastEntries as entry (entry.date)}
                     <a
-                        href={resolve(`/${entry.date}`)}
+                        href={resolve('/[[mode=mode]]/[date=date]', {
+                            mode: modeParam(mode),
+                            date: entry.date,
+                        })}
                         class="flex flex-row items-center justify-center gap-2 rounded-xl p-2 transition-all hover:bg-theme-card active:scale-[0.98]"
                     >
                         <span class="text-[10px] tracking-widest text-theme-muted uppercase"

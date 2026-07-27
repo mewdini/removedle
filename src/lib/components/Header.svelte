@@ -11,6 +11,8 @@
     import Modal from './Modal.svelte';
     import Logo from './Logo.svelte';
     import { themes } from '$lib/themes';
+    import { page } from '$app/state';
+    import { MODE_LIST, modeParam, resolveMode, type ModeConfig } from '$lib/modes';
 
     let {
         volume = $bindable(),
@@ -32,6 +34,29 @@
         inputVolume = value;
         volume = value;
     }
+
+    const currentMode = $derived(resolveMode(page.data.mode));
+
+    // The mode switcher is navigation, not a setting: the URL is the source of
+    // truth, so these are plain anchors that work without JS and stay on the
+    // equivalent page. Switching from a dated game keeps the date, so you can
+    // compare the same day across modes.
+    function modeHref(target: ModeConfig) {
+        const mode = modeParam(target);
+
+        switch (page.route.id) {
+            case '/[[mode=mode]]/[date=date]':
+                return resolve('/[[mode=mode]]/[date=date]', {
+                    mode,
+                    date: page.params.date!,
+                });
+            case '/[[mode=mode]]/archive':
+                return resolve('/[[mode=mode]]/archive', { mode });
+            // '/[[mode=mode]]' and the 404 page (route.id === null)
+            default:
+                return resolve('/[[mode=mode]]', { mode });
+        }
+    }
 </script>
 
 <div class="flex w-full flex-col items-center justify-center gap-2 pt-4 align-middle">
@@ -40,12 +65,29 @@
          roughly 0.72em, hence 56px / 84px here. -->
     <Logo class="text-[3.5rem] text-theme-text sm:text-[5.25rem]" />
     <span class="px-4 text-center">
-        <p class="text-lg text-theme-text">A daily Jane Remover song guessing game!</p>
+        <p class="text-lg text-theme-text">{currentMode.blurb}</p>
         <p class="text-sm text-theme-text">by mewdini</p>
     </span>
+    <nav
+        aria-label="Game mode"
+        class="flex flex-row gap-0.5 rounded-full border border-theme-muted p-0.5"
+    >
+        {#each MODE_LIST as m (m.id)}
+            <a
+                href={modeHref(m)}
+                aria-current={m.id === currentMode.id ? 'page' : undefined}
+                class="rounded-full px-4 py-1 text-sm font-bold transition-all active:scale-95 {m.id ===
+                currentMode.id
+                    ? 'bg-theme-accent text-theme-text'
+                    : 'text-theme-muted hover:text-theme-text'}">{m.label}</a
+            >
+        {/each}
+    </nav>
     <div class="flex flex-row items-center gap-2 text-theme-text">
         <span class="flex items-center transition-all hover:scale-105 active:scale-95"
-            ><a href={resolve('/archive')}><ArchiveOutline class="h-8 w-8 shrink-0" /></a></span
+            ><a href={resolve('/[[mode=mode]]/archive', { mode: modeParam(currentMode) })}
+                ><ArchiveOutline class="h-8 w-8 shrink-0" /></a
+            ></span
         >
         <span class="flex items-center transition-all hover:scale-105 active:scale-95"
             ><button

@@ -4,14 +4,18 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { runFfmpeg } from './lib/ffmpeg.js';
 import { BUCKETS, readObject } from './lib/r2.js';
+import { modeDirs, parseMode } from './lib/modes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../out/data');
+const MODE = parseMode();
+const DIRS = modeDirs(MODE);
+
+const DATA_DIR = DIRS.data;
 const REGISTRY_FILE = path.join(DATA_DIR, 'song-registry.json');
-const MASTERS_DIR = process.env.MASTERS_DIR || path.resolve(__dirname, '../out/masters');
-const OUTPUT_BASE_DIR = process.env.OUTPUT_DIR || path.resolve(__dirname, '../out/dailies');
+const MASTERS_DIR = DIRS.masters;
+const OUTPUT_BASE_DIR = DIRS.dailies;
 const VOLUME_THRESHOLD = -35;
 const MAX_RETRIES = 5;
 const DEDUPLICATE_DAYS = 5;
@@ -96,7 +100,7 @@ async function getPreviousSongIds(dateArg) {
     // disable de-duplication, producing a challenge that repeats recent songs.
     await Promise.all(
         previousDates.map(async (date) => {
-            const raw = await readObject(BUCKETS.challenges, `${date}/meta.json`);
+            const raw = await readObject(BUCKETS.challenges, `${MODE.prefix}${date}/meta.json`);
 
             if (raw === null) {
                 console.log(`   No challenge stored for ${date}, skipping`);
@@ -129,8 +133,9 @@ function songKey(title) {
 
 async function generateDaily() {
     try {
-        const dateArg = process.argv[2] || TODAY_DATE;
-        console.log(`Generating challenge for: ${dateArg}`);
+        // First non-flag argument, so `--mode=` can appear on either side of it.
+        const dateArg = process.argv.slice(2).find((arg) => !arg.startsWith('--')) || TODAY_DATE;
+        console.log(`Generating ${MODE.id} challenge for: ${dateArg}`);
 
         console.log(`Retrieving songs for last ${DEDUPLICATE_DAYS} days of challenges...`);
         const previousSongsSet = await getPreviousSongIds(dateArg);
@@ -142,7 +147,12 @@ async function generateDaily() {
             throw new Error('Not enough songs in registry (need at least 5)');
         }
 
-        const random = createSeededRandom(dateArg);
+        // Seeded per mode as well as per date, so two modes generating the same
+        // day do not walk the same random sequence and pick correlated indices.
+        // MODE.seedPrefix is deliberately '' for normal: changing it would
+        // re-roll every past and future normal day, swapping answers under
+        // anyone mid-game and churning the immutable snippet cache.
+        const random = createSeededRandom(MODE.seedPrefix + dateArg);
 
         const availableIds = [...songIds];
         const selectedRounds = [];
@@ -190,7 +200,7 @@ async function generateDaily() {
             }
 
             const masterPath = path.join(MASTERS_DIR, song.filename);
-            const songRandom = createSeededRandom(dateArg + songId);
+            const songRandom = createSeededRandom(MODE.seedPrefix + dateArg + songId);
             const snippetConfigs = [
                 { id: 1, duration: 0.5, type: 'random' },
                 { id: 2, duration: 1.0, type: 'random' },

@@ -1,9 +1,11 @@
 import type { PageServerLoad } from './$types';
-import { START_DATE_STRING } from '$lib/statics';
-import { calculateDays, getTodayDate } from '../../params/date';
+import { resolveMode } from '$lib/modes';
+import { calculateDays, getTodayDate } from '$params/date';
 
-export const load: PageServerLoad = async () => {
-    const start = new Date(START_DATE_STRING);
+export const load: PageServerLoad = async ({ params }) => {
+    const mode = resolveMode(params.mode);
+
+    const start = new Date(mode.startDate);
     const dayOne = new Date(
         Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
     );
@@ -21,7 +23,7 @@ export const load: PageServerLoad = async () => {
 
         archiveEntries.push({
             date: dateString,
-            day: calculateDays(START_DATE_STRING, dateString),
+            day: calculateDays(mode.startDate, dateString),
         });
 
         current.setUTCDate(current.getUTCDate() - 1);

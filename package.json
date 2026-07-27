@@ -20,7 +20,13 @@
         "scan": "node scripts/scan-songs.js",
         "generate": "node scripts/generate-daily.js",
         "convert": "node scripts/convert-masters.js",
-        "bootstrap": "node scripts/bootstrap-registry.js"
+        "bootstrap": "node scripts/bootstrap-registry.js",
+        "scan:challenger": "node scripts/scan-songs.js --mode=challenger",
+        "generate:challenger": "node scripts/generate-daily.js --mode=challenger",
+        "convert:challenger": "node scripts/convert-masters.js --mode=challenger",
+        "bootstrap:challenger": "node scripts/bootstrap-registry.js --mode=challenger",
+        "links:challenger": "node scripts/resolve-links.js --mode=challenger",
+        "links:review": "node scripts/link-review.js"
     },
     "devDependencies": {
         "@eslint/compat": "^2.1.0",

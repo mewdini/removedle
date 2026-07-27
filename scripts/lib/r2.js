@@ -69,8 +69,9 @@ export async function uploadFile(bucket, key, localPath) {
     if (key.includes('/round-')) {
         // 1 year for snippets, won't change
         cacheControl = 'public, max-age=31536000, immutable';
-    } else if (key.startsWith('art/')) {
-        // 1 week for album covers
+    } else if (/(^|\/)art\//.test(key)) {
+        // 1 week for album covers. Matched anywhere in the key rather than only
+        // at the start, so a mode-prefixed key (challenger/art/...) still counts.
         cacheControl = 'public, max-age=604800';
     }
 
@@ -108,14 +109,21 @@ export async function listObjects(bucket, prefix = '') {
     return contents;
 }
 
-export async function syncPull(bucket, prefix, localDir, excludePrefix = null) {
+// `exclude` is a list of key prefixes to skip. Modes share buckets and are told
+// apart only by their key prefix, so a mode pulling from the bucket root MUST
+// exclude every other mode's prefix. Without that, the other mode's objects land
+// in this mode's local tree and the next (wholesale-overwrite) push re-uploads
+// them from a stale copy, silently reverting whatever wrote them last.
+export async function syncPull(bucket, prefix, localDir, exclude = []) {
+    const excludePrefixes = (Array.isArray(exclude) ? exclude : [exclude]).filter(Boolean);
+
     console.log(`Pulling s3://${bucket}/${prefix} to ${localDir}...`);
     const objects = await listObjects(bucket, prefix);
 
     await Promise.all(
         objects.map(async (obj) => {
             if (obj.Key.endsWith('/')) return; //ignore folders
-            if (excludePrefix && obj.Key.startsWith(excludePrefix)) return; //ignore excluded files
+            if (excludePrefixes.some((p) => obj.Key.startsWith(p))) return; //ignore excluded files
 
             const relativeKey = prefix ? obj.Key.replace(prefix, '').replace(/^\//, '') : obj.Key;
             const localPath = path.join(localDir, relativeKey);
@@ -216,8 +224,13 @@ async function walkFiles(dir) {
     return files;
 }
 
-export async function syncPush(localDir, bucket, prefix = '') {
-    console.log(`Pushing ${localDir} to s3://${bucket}/${prefix}...`);
+// `excludeDirs` skips top-level sub-directories by name. out/dailies is shared
+// between modes (it mirrors the R2 key space so dev URLs match production), so a
+// normal push has to skip the nested per-mode directories it would otherwise
+// walk into and re-upload at the wrong keys.
+export async function syncPush(localDir, bucket, prefix = '', { excludeDirs = [] } = {}) {
+    const root = path.resolve(localDir);
+    console.log(`Pushing ${root} to s3://${bucket}/${prefix}...`);
 
     const files = [];
     async function walk(dir) {
@@ -225,6 +238,10 @@ export async function syncPush(localDir, bucket, prefix = '') {
         for (const entry of entries) {
             const res = path.resolve(dir, entry.name);
             if (entry.isDirectory()) {
+                if (dir === root && excludeDirs.includes(entry.name)) {
+                    console.log(`  Skipping ${entry.name}/ (belongs to another mode)`);
+                    continue;
+                }
                 await walk(res);
             } else {
                 files.push(res);
@@ -232,11 +249,11 @@ export async function syncPush(localDir, bucket, prefix = '') {
         }
     }
 
-    await walk(localDir);
+    await walk(root);
 
     await Promise.all(
         files.map(async (filePath) => {
-            const relativePath = path.relative(localDir, filePath);
+            const relativePath = path.relative(root, filePath);
             const key = prefix
                 ? path.join(prefix, relativePath).replace(/\\/g, '/')
                 : relativePath.replace(/\\/g, '/');

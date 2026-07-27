@@ -3,12 +3,16 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { modeDirs, parseMode } from './lib/modes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const MASTERS_DIR = process.env.MASTERS_DIR || path.resolve(__dirname, '../out/masters');
-const REGISTRY_FILE = path.resolve(__dirname, '../out/data/song-registry.json');
+const MODE = parseMode();
+const DIRS = modeDirs(MODE);
+
+const MASTERS_DIR = DIRS.masters;
+const REGISTRY_FILE = path.join(DIRS.data, 'song-registry.json');
 const SUPPORTED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg'];
 
 async function getFileHash(filePath) {
@@ -35,7 +39,7 @@ async function bootstrap() {
             //ignored
         }
 
-        console.log(`Bootstrapping registry from: ${MASTERS_DIR}`);
+        console.log(`Bootstrapping ${MODE.id} registry from: ${MASTERS_DIR}`);
 
         // check if out/data exists
         await fs.mkdir(path.dirname(REGISTRY_FILE), { recursive: true });

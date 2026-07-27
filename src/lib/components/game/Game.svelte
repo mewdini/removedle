@@ -10,8 +10,9 @@
     import { createSharedSnippetPlayer } from '$lib/player.svelte';
     import { getSettingsContext } from '$lib/settings.svelte';
     import { calculatePoints } from '$lib/gameUtils';
-    import { invalidateAll } from '$app/navigation';
-    import { calculateDays, getTodayDate } from '../../../params/date';
+    import { invalidate } from '$app/navigation';
+    import { calculateDays, getTodayDate } from '$params/date';
+    import { gameStorageKey, modeParam, resolveMode, statsStorageKey } from '$lib/modes';
 
     const { data } = $props();
 
@@ -20,6 +21,7 @@
     const date = $derived(data.date);
     const day = $derived(data.day);
     const globalData = $derived(data.globalData);
+    const mode = $derived(resolveMode(data.mode));
     const settings = getSettingsContext();
     const player = createSharedSnippetPlayer();
     const isToday = $derived(date === getTodayDate());
@@ -59,14 +61,22 @@
         player.setVolume(settings?.volume ?? 10);
     });
 
-    //stop playing when changing dates
+    //stop playing when changing dates or modes
     $effect(() => {
         const _ = date;
+        const _m = mode.id;
         player.stop();
     });
 
     $effect(() => {
         if (!date) return;
+
+        // Depend on the mode as well as the date. Switching modes on a dated URL
+        // (/2026-07-26 -> /challenger/2026-07-26) keeps the same route and the
+        // same date, so keying on `date` alone would leave this effect dormant:
+        // the previous mode's gameState would survive and the persist effect
+        // below would immediately write it under the new mode's storage key.
+        const activeMode = mode;
 
         loading = true;
 
@@ -79,8 +89,18 @@
             gameState.roundStatuses = Array(MAX_ROUNDS).fill('playing');
             gameState.hasSaved = false;
 
-            //get stats
-            const savedStats = localStorage.getItem('removedle-stats');
+            // Reset the streak too, not just the board. Hydration below only
+            // assigns when there is something saved, so without this a mode with
+            // no stats yet (the first visit to a new mode) would keep the PREVIOUS
+            // mode's streak in memory and the persist effect would immediately
+            // write it under the new mode's key -- inheriting a best streak the
+            // player never earned in that game.
+            stats.currentStreak = 0;
+            stats.bestStreak = 0;
+            stats.lastChallengeCompletedDate = '';
+
+            //get stats (per mode: each game has its own streak)
+            const savedStats = localStorage.getItem(statsStorageKey(activeMode));
             if (savedStats) {
                 try {
                     const statsParsed = JSON.parse(savedStats);
@@ -116,7 +136,7 @@
             }
 
             //get save data for current date
-            const savedGameData = localStorage.getItem(`removedle-${date}`);
+            const savedGameData = localStorage.getItem(gameStorageKey(activeMode, date));
             if (savedGameData) {
                 try {
                     const parsed = JSON.parse(savedGameData);
@@ -161,7 +181,7 @@
     $effect(() => {
         const stateToSave = JSON.stringify(gameState);
         if (!loading && date) {
-            localStorage.setItem(`removedle-${date}`, stateToSave);
+            localStorage.setItem(gameStorageKey(mode, date), stateToSave);
         }
     });
 
@@ -169,7 +189,7 @@
     $effect(() => {
         const statsToSave = JSON.stringify(stats);
         if (!loading) {
-            localStorage.setItem('removedle-stats', statsToSave);
+            localStorage.setItem(statsStorageKey(mode), statsToSave);
         }
     });
 
@@ -264,7 +284,10 @@
             });
 
             if (response.ok) {
-                await invalidateAll();
+                // Refresh only the stats read (see `depends('app:stats')`), not the
+                // whole page: invalidateAll() would re-run the layout load and re-send
+                // the entire song catalog just to update two aggregate integers.
+                await invalidate('app:stats');
             } else {
                 gameState.hasSaved = false;
             }
@@ -291,6 +314,7 @@
             <Board
                 {day}
                 {date}
+                {mode}
                 {songList}
                 {gameState}
                 {dailyMeta}
@@ -305,6 +329,7 @@
                 {day}
                 {isToday}
                 {date}
+                {mode}
                 {songList}
                 {dailyMeta}
                 {gameState}
@@ -321,7 +346,7 @@
         <p>No challenge found for this date. Please let mewdini know about this!</p>
         <a
             class="flex flex-row items-center gap-1 text-sm hover:underline"
-            href={resolve('/archive')}
+            href={resolve('/[[mode=mode]]/archive', { mode: modeParam(mode) })}
         >
             <AngleLeftOutline class="h-4 w-4 shrink-0" />
             <p>Play past games</p>

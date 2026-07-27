@@ -12,10 +12,24 @@
     import { onMount } from 'svelte';
     import { setSettingsContext } from '$lib/settings.svelte';
     import { themes } from '$lib/themes';
+    import { page } from '$app/state';
+    import { MODES, resolveMode } from '$lib/modes';
 
     import type { AppSettings } from '$lib/interfaces';
 
     let { children } = $props();
+
+    // Each mode gets its own title, description and canonical URL, so a shared
+    // /challenger link previews as the Challenger game rather than the main one.
+    const mode = $derived(resolveMode(page.data.mode));
+    const pageTitle = $derived(mode.id === MODES.normal.id ? NAME : `${NAME} · ${mode.label}`);
+    const pageDescription = $derived(
+        mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurb} ${DESCRIPTION}`
+    );
+    // The current page, not the mode root -- and built from page.url rather than
+    // resolve(), which returns paths relative to the current route ('.',
+    // '../challenger') and so cannot be concatenated onto an origin.
+    const canonical = $derived(SITE + page.url.pathname);
     let settings: AppSettings = $state({
         volume: 10,
         theme: 'dark',
@@ -76,22 +90,26 @@
 </script>
 
 <svelte:head>
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    <link rel="canonical" href={canonical} />
+
     <!-- Google / Search Engine Tags -->
-    <meta itemprop="name" content={NAME} />
-    <meta itemprop="description" content={DESCRIPTION} />
+    <meta itemprop="name" content={pageTitle} />
+    <meta itemprop="description" content={pageDescription} />
     <meta itemprop="image" content={favicon128} />
 
     <!-- Facebook Meta Tags -->
-    <meta property="og:url" content={SITE} />
+    <meta property="og:url" content={canonical} />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content={NAME} />
-    <meta property="og:description" content={DESCRIPTION} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
     <meta property="og:image" content={favicon128} />
 
     <!-- Twitter Meta Tags -->
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content={NAME} />
-    <meta name="twitter:description" content={DESCRIPTION} />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={pageDescription} />
     <meta name="twitter:image" content={favicon128} />
 
     <link rel="icon" href={SITE + '/favicon.png'} />

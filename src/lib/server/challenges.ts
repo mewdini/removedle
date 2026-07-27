@@ -1,50 +1,33 @@
 import type { DailyMeta, Song } from '$lib/interfaces';
-import {
-    ASSETS_URL,
-    CHALLENGES_URL,
-    GUESSES_PER_ROUND,
-    MAX_ROUNDS,
-    START_DATE_STRING,
-} from '$lib/statics';
+import { GUESSES_PER_ROUND, MAX_ROUNDS } from '$lib/statics';
+import { albumMapUrl, catalogUrl, metaUrl, type ModeConfig, type ModeId } from '$lib/modes';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { challengeStats } from './db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { getTodayDate } from '../../params/date';
+import { getTodayDate } from '$params/date';
 
 type AlbumEntry = {
     name: string;
     file: string;
 };
 
-export function validateChallengeDate(value: string): boolean {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-
-    const [year, month, day] = value.split('-').map(Number);
-    const candidate = new Date(Date.UTC(year, month - 1, day));
-
-    return (
-        candidate.getUTCFullYear() === year &&
-        candidate.getUTCMonth() === month - 1 &&
-        candidate.getUTCDate() === day
-    );
-}
-
 export function isFutureChallengeDate(value: string): boolean {
     // Future = after the current Pacific calendar day (the game rolls over at PT
     // midnight). Zero-padded ISO date strings compare lexically in chronological
     // order, and `value` is validated as YYYY-MM-DD by the date param matcher.
+    // Mode-independent: every mode unlocks the same day at the same instant.
     return value > getTodayDate();
 }
 
-// Dates before day 1 are not part of the game. Without this they are merely
-// absent from the archive listing but still reachable by URL, and loading one
-// lazily inserts an empty challengeStats row via getGlobalData.
-export function isBeforeFirstChallengeDate(value: string): boolean {
+// Dates before a mode's day 1 are not part of that game. Without this they are
+// merely absent from the archive listing but still reachable by URL, and loading
+// one lazily inserts an empty challengeStats row via getGlobalData.
+export function isBeforeFirstChallengeDate(mode: ModeConfig, value: string): boolean {
     const [year, month, day] = value.split('-').map(Number);
     const candidate = new Date(Date.UTC(year, month - 1, day));
 
-    const [sy, sm, sd] = START_DATE_STRING.split('-').map(Number);
+    const [sy, sm, sd] = mode.startDate.split('-').map(Number);
     const start = new Date(Date.UTC(sy, sm - 1, sd));
 
     return candidate.getTime() < start.getTime();
@@ -52,56 +35,67 @@ export function isBeforeFirstChallengeDate(value: string): boolean {
 
 export async function loadChallengeByDate(
     fetchFn: typeof fetch,
+    mode: ModeConfig,
     date: string
 ): Promise<DailyMeta | null> {
-    const res = await fetchFn(`${CHALLENGES_URL}/${date}/meta.json`);
+    const res = await fetchFn(metaUrl(mode, date));
 
     if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Failed to load challenge metadata for ${date}`);
+    if (!res.ok) throw new Error(`Failed to load ${mode.id} challenge metadata for ${date}`);
 
     return res.json();
 }
 
-export async function loadSongCatalog(fetchFn: typeof fetch): Promise<Song[]> {
-    const res = await fetchFn(`${ASSETS_URL}/songs.json`);
-    if (!res.ok) throw new Error('Failed to load song catalog');
+export async function loadSongCatalog(fetchFn: typeof fetch, mode: ModeConfig): Promise<Song[]> {
+    const res = await fetchFn(catalogUrl(mode));
+    if (!res.ok) throw new Error(`Failed to load ${mode.id} song catalog`);
     return res.json();
 }
 
-export async function loadAlbumMap(fetchFn: typeof fetch): Promise<AlbumEntry[]> {
-    const res = await fetchFn(`${ASSETS_URL}/covers.json`);
-    if (!res.ok) throw new Error('Failed to load album map');
+export async function loadAlbumMap(fetchFn: typeof fetch, mode: ModeConfig): Promise<AlbumEntry[]> {
+    const res = await fetchFn(albumMapUrl(mode));
+    if (!res.ok) throw new Error(`Failed to load ${mode.id} album map`);
     return res.json();
 }
 
-export async function getGlobalData(db: DrizzleD1Database<typeof schema>, date: string) {
-    const data = await db.select().from(challengeStats).where(eq(challengeStats.date, date));
-    console.log('found data: ' + JSON.stringify(data));
+// Community stats are keyed on (mode, date): each mode is a separate game, so a
+// day's totals must not be shared between them.
+export async function getGlobalData(
+    db: DrizzleD1Database<typeof schema>,
+    mode: ModeId,
+    date: string
+) {
+    const data = await db
+        .select()
+        .from(challengeStats)
+        .where(and(eq(challengeStats.mode, mode), eq(challengeStats.date, date)));
 
     //if there's no data for the date yet
     if (data.length === 0) {
-        console.log('did not find a date, creating a row');
-        return insertNewGlobalData(db, date);
+        return insertNewGlobalData(db, mode, date);
     }
 
     return data[0];
 }
 
-async function insertNewGlobalData(db: DrizzleD1Database<typeof schema>, date: string) {
-    const newRow = await db.insert(challengeStats).values({ date: date }).returning();
-    console.log('created new row: ', JSON.stringify(newRow));
-
+async function insertNewGlobalData(
+    db: DrizzleD1Database<typeof schema>,
+    mode: ModeId,
+    date: string
+) {
+    const newRow = await db.insert(challengeStats).values({ mode, date }).returning();
     return newRow[0];
 }
 
 export async function updateGlobalData(
     db: DrizzleD1Database<typeof schema>,
+    mode: ModeConfig,
     date: string,
     points: number
 ) {
     if (
         isFutureChallengeDate(date) ||
-        isBeforeFirstChallengeDate(date) ||
+        isBeforeFirstChallengeDate(mode, date) ||
         points < 0 ||
         points > MAX_ROUNDS * GUESSES_PER_ROUND
     ) {
@@ -114,7 +108,7 @@ export async function updateGlobalData(
             totalGames: sql`${challengeStats.totalGames} + 1`,
             totalPoints: sql`${challengeStats.totalPoints} + ${points}`,
         })
-        .where(eq(challengeStats.date, date));
+        .where(and(eq(challengeStats.mode, mode.id), eq(challengeStats.date, date)));
 
     return { success: true };
 }

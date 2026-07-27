@@ -5,13 +5,18 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { encode } from '@msgpack/msgpack';
 import { runFfmpeg } from './lib/ffmpeg.js';
+import { modeDirs, NON_ALBUM_LABELS, parseMode } from './lib/modes.js';
+import { findDuplicates } from './lib/similarity.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const MASTERS_DIR = process.env.MASTERS_DIR || path.resolve(__dirname, '../out/masters');
-const DATA_DIR = process.env.DATA_DIR || path.resolve(__dirname, '../out/data');
-const COVER_DIR = process.env.COVERS_DIR || path.resolve(__dirname, '../out/covers');
+const MODE = parseMode();
+const DIRS = modeDirs(MODE);
+
+const MASTERS_DIR = DIRS.masters;
+const DATA_DIR = DIRS.data;
+const COVER_DIR = DIRS.covers;
 const REGISTRY_FILE = path.join(DATA_DIR, 'song-registry.json');
 
 const SONGLIST_OUTPUT_FILE = path.join(DATA_DIR, 'songs.json');
@@ -26,8 +31,32 @@ async function getFileHash(filePath) {
     return crypto.createHash('sha256').update(content).digest('hex');
 }
 
-async function extractArt(songPath, albumName, metadata) {
+// Cover file names are derived from the album name. The replacement is kept
+// exactly as it always was so existing slugs (and the R2 objects behind them)
+// do not move -- the only addition is a fallback for names that contain no
+// alphanumerics at all, which used to collapse to a single "-.webp" shared by
+// every such album. The fallback hashes the name rather than using a song id so
+// it stays stable no matter which track of the album is scanned first.
+function albumSlug(albumName) {
     const slug = albumName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    if (/[a-z0-9]/.test(slug)) return slug;
+    return `album-${crypto.createHash('sha256').update(albumName).digest('hex').slice(0, 8)}`;
+}
+
+// Some tags are filing labels, not records ("Singles"). Under a mode that opts
+// in, a track tagged with one becomes its own one-track album keyed by its
+// title. That makes generate-daily's per-album cap meaningful (it would
+// otherwise treat the whole loosies pile as a single record and starve the
+// selection), and gives each track its own cover instead of one shared image.
+// The one-track grouping also sets isSingle, which the UI already uses to hide
+// the album line.
+function effectiveAlbum(albumName, title) {
+    if (MODE.singlesAsOwnAlbum && NON_ALBUM_LABELS.has(albumName)) return title;
+    return albumName;
+}
+
+async function extractArt(songPath, albumName, metadata) {
+    const slug = albumSlug(albumName);
     const outputPath = path.join(COVER_DIR, `${slug}.webp`);
 
     try {
@@ -66,8 +95,43 @@ async function extractArt(songPath, albumName, metadata) {
     }
 }
 
+// Two masters that are the same recording are invisible to everything else: the
+// tags differ, the content hashes differ, and generate-daily's songKey does not
+// collapse them -- so the same audio can become the answer to two days, or even
+// to two rounds of one day. Warn rather than fail: a false positive must not
+// block a scan, and the fix (retire one master, delete its registry entry) is a
+// judgement call.
+async function reportDuplicates(registry) {
+    const tracks = Object.entries(registry).map(([id, e]) => ({
+        id,
+        title: e.title,
+        duration: e.duration,
+        file: path.join(MASTERS_DIR, e.filename),
+    }));
+
+    const { pairs, compared } = await findDuplicates(tracks);
+    if (!compared) return;
+
+    if (!pairs.length) {
+        console.log(`Duplicate check: ${compared} similar-length pair(s) compared, none matched.`);
+        return;
+    }
+
+    console.warn(`\n⚠ Possible duplicate recordings (${pairs.length}):`);
+    for (const p of pairs) {
+        console.warn(`   ${p.score.toFixed(3)}  "${p.a.title}" (${p.a.id})`);
+        console.warn(`          == "${p.b.title}" (${p.b.id})`);
+    }
+    console.warn(
+        '  Same audio under two ids can be drawn as two rounds of one day. To retire one:\n' +
+            '  move its master out of masters/<mode>/, DELETE its entry from song-registry.json\n' +
+            '  (scan never removes entries), then regenerate any day that referenced it.'
+    );
+}
+
 async function scanSongs() {
     try {
+        console.log(`Mode: ${MODE.id}`);
         console.log(`Scanning directory: ${MASTERS_DIR}`);
         const files = await fs.readdir(MASTERS_DIR);
 
@@ -92,8 +156,8 @@ async function scanSongs() {
                 console.log(`Processing: ${file}...`);
 
                 const metadata = await mm.parseFile(fullPath);
-                const albumName = metadata.common.album || 'Unknown Album';
                 const title = metadata.common.title || path.basename(file, ext);
+                const albumName = effectiveAlbum(metadata.common.album || 'Unknown Album', title);
                 const artist = metadata.common.artist || 'Unknown Artist';
                 const duration = Math.floor(metadata.format.duration * 1000) / 1000;
                 const contentHash = await getFileHash(fullPath);
@@ -162,9 +226,17 @@ async function scanSongs() {
                     tried: existingEntry?.tried,
                     deadLinks: existingEntry?.deadLinks,
                     coderived: existingEntry?.coderived,
+                    // Cautious-resolution state (strict link policy): candidates
+                    // awaiting a human accept/reject, URLs a human already
+                    // rejected, and the "zero links is expected here" marker.
+                    // Manual triage is stored in the registry, so leaving these
+                    // out would make the next scan silently discard the review.
+                    needsReview: existingEntry?.needsReview,
+                    rejectedLinks: existingEntry?.rejectedLinks,
+                    linksOptional: existingEntry?.linksOptional,
                 };
 
-                const slug = albumName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+                const slug = albumSlug(albumName);
                 await extractArt(fullPath, albumName, metadata);
 
                 if (!albumsMap.has(slug)) {
@@ -201,6 +273,8 @@ async function scanSongs() {
 
         console.log(`\nSuccess! Generated manifest for ${songList.length} songs.`);
         console.log(`Output saved to: ${SONGLIST_OUTPUT_FILE}`);
+
+        await reportDuplicates(registry);
     } catch (error) {
         console.error('Error scanning songs:', error);
         process.exit(1);

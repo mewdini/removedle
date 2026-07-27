@@ -4,6 +4,12 @@ import adapter from '@sveltejs/adapter-cloudflare';
 const config = {
     kit: {
         adapter: adapter(),
+        // src/params holds the route matchers plus the shared date helpers that
+        // both the server and the client need. Routes are nested at varying
+        // depths now, so an alias beats counting ../ segments.
+        alias: {
+            $params: 'src/params',
+        },
     },
 };
 

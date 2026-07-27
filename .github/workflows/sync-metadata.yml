@@ -2,11 +2,23 @@ name: Sync Metadata
 
 on:
     workflow_dispatch:
+        inputs:
+            mode:
+                description: 'Which game mode to re-scan'
+                required: false
+                default: 'both'
+                type: choice
+                options:
+                    - both
+                    - normal
+                    - challenger
 
 jobs:
     sync:
         if: github.repository == 'mewdini/removedle' && github.actor == 'mewdini'
         runs-on: ubuntu-latest
+        env:
+            MODE_INPUT: ${{ github.event.inputs.mode || 'both' }}
         steps:
             - uses: actions/checkout@v7
 
@@ -29,18 +41,18 @@ jobs:
                       out/data
                       out/masters
                       out/covers
+                      out/challenger/data
+                      out/challenger/masters
+                      out/challenger/covers
                   key: removedle-cache-${{ github.run_id }}
                   restore-keys: removedle-cache-
 
-            - name: Pull Masters from R2
-              run: node scripts/sync-r2.js pull-masters
-              env:
-                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-
-            - name: Pull Data from R2
+            # Modes share the buckets and are separated by key prefix, so each pull
+            # excludes the other modes' prefixes (see scripts/sync-r2.js).
+            - name: Pull from R2 (normal)
+              if: env.MODE_INPUT == 'both' || env.MODE_INPUT == 'normal'
               run: |
+                  node scripts/sync-r2.js pull-masters
                   node scripts/sync-r2.js pull-data
                   node scripts/sync-r2.js pull-art
               env:
@@ -48,15 +60,40 @@ jobs:
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
-            - name: Scan Songs & Extract Art
+            # No MASTERS_DIR/DATA_DIR/COVERS_DIR overrides: they already equal the
+            # script defaults, and an override that does not name the mode is
+            # refused outright (scripts/lib/modes.js) so a stray one can never make
+            # one mode's scan rewrite another mode's registry.
+            - name: Scan Songs & Extract Art (normal)
+              if: env.MODE_INPUT == 'both' || env.MODE_INPUT == 'normal'
               run: node scripts/scan-songs.js
-              env:
-                  MASTERS_DIR: ./out/masters
-                  DATA_DIR: ./out/data
-                  COVERS_DIR: ./out/covers
 
-            - name: Push Metadata & Art to R2
+            - name: Push Metadata & Art to R2 (normal)
+              if: env.MODE_INPUT == 'both' || env.MODE_INPUT == 'normal'
               run: node scripts/sync-r2.js push-data
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            - name: Pull from R2 (challenger)
+              if: env.MODE_INPUT == 'both' || env.MODE_INPUT == 'challenger'
+              run: |
+                  node scripts/sync-r2.js pull-masters --mode=challenger
+                  node scripts/sync-r2.js pull-data --mode=challenger
+                  node scripts/sync-r2.js pull-art --mode=challenger
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            - name: Scan Songs & Extract Art (challenger)
+              if: env.MODE_INPUT == 'both' || env.MODE_INPUT == 'challenger'
+              run: node scripts/scan-songs.js --mode=challenger
+
+            - name: Push Metadata & Art to R2 (challenger)
+              if: env.MODE_INPUT == 'both' || env.MODE_INPUT == 'challenger'
+              run: node scripts/sync-r2.js push-data --mode=challenger
               env:
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
