@@ -7,6 +7,10 @@
     let searchTerm = $state('');
     let suggestionIndex = $state(0);
     let results: Song[] = $state([]);
+    // Latches true once the dropdown has opened for this guess and stays true
+    // (through delete/retype) until the guess resets, so its reserved space isn't
+    // released mid-typing. See SearchResults.svelte.
+    let hasOpened = $state(false);
     let playing = $derived(player.isPlaying(src));
     let iconClass = $derived(
         `h-[42px] w-[42px] ${isActive || result !== 'playing' ? 'transition-all hover:scale-110 active:scale-95' : ''}`
@@ -22,9 +26,14 @@
     });
 
     $effect(() => {
+        if (results.length > 0) hasOpened = true;
+    });
+
+    $effect(() => {
         const _ = src;
         searchTerm = '';
         suggestionIndex = 0;
+        hasOpened = false;
     });
 
     function getText() {
@@ -97,7 +106,7 @@
             class="relative flex min-w-0 flex-1 flex-row rounded-3xl border border-theme-text focus-within:ring-2 focus-within:ring-theme-accent"
         >
             {#if isCurrentGuess()}
-                <SearchResults {results} {suggestionIndex} {submitGuess} />
+                <SearchResults {results} {suggestionIndex} {submitGuess} open={hasOpened} />
             {/if}
             <input
                 class="text-md my-1 w-full min-w-0 border-none bg-transparent px-2 text-theme-text outline-none focus:ring-0"
