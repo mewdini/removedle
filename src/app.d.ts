@@ -2,7 +2,12 @@ import { D1Database, R2Bucket, IncomingRequestCfProperties } from '@cloudflare/w
 declare global {
     namespace App {
         // interface Error {}
-        // interface Locals {}
+        interface Locals {
+            // Set by the handle hook from the via-janedle cookie: this player
+            // arrived through the alias domain and has earned the wordmark
+            // easter egg. See ALT_HOST in $lib/statics.
+            viaAlias: boolean;
+        }
         // interface PageData {}
         // interface PageState {}
         interface Platform {

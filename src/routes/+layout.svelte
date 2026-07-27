@@ -8,7 +8,7 @@
 
     import '@fontsource/poppins';
     import Header from '$lib/components/Header.svelte';
-    import { DESCRIPTION, NAME, SITE } from '$lib/statics.js';
+    import { DESCRIPTION, SITE, siteName } from '$lib/statics.js';
     import { onMount } from 'svelte';
     import { setSettingsContext } from '$lib/settings.svelte';
     import { themes } from '$lib/themes';
@@ -22,7 +22,10 @@
     // Each mode gets its own title, description and canonical URL, so a shared
     // /challenger link previews as the Challenger game rather than the main one.
     const mode = $derived(resolveMode(page.data.mode));
-    const pageTitle = $derived(mode.id === MODES.normal.id ? NAME : `${NAME} · ${mode.label}`);
+    // Carries the janedle easter egg into the tab title and share previews too,
+    // so the alias is consistent rather than only skin-deep on the wordmark.
+    const name = $derived(siteName(!!page.data.viaAlias));
+    const pageTitle = $derived(mode.id === MODES.normal.id ? name : `${name} · ${mode.label}`);
     // Both blurbs end in their own punctuation, so a plain space is enough to
     // keep the two sentences apart in the link previews Discord and Slack build
     // from this.

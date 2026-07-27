@@ -5,7 +5,7 @@ import { loadSongCatalog, loadAlbumMap, loadBlurbLinks } from '$lib/server/chall
 import { resolveMode } from '$lib/modes';
 import { ERROR_LINES } from '$lib/statics';
 
-export const load: LayoutServerLoad = async ({ fetch, route, params }) => {
+export const load: LayoutServerLoad = async ({ fetch, route, params, locals }) => {
     // Reading params.mode registers it as a dependency, so this load re-runs when
     // the mode changes but NOT when only the date does -- which is what keeps a
     // date navigation from re-fetching and re-serialising the whole catalog.
@@ -29,6 +29,10 @@ export const load: LayoutServerLoad = async ({ fetch, route, params }) => {
             // Only the id crosses the load boundary; components resolve it back
             // into the full config with resolveMode().
             mode: mode.id,
+            // Whether this player came in through the alias domain, which only
+            // changes the wordmark. Resolved server-side so the egg is in the
+            // SSR'd HTML rather than swapping in after hydration.
+            viaAlias: locals.viaAlias,
             songList,
             albums,
             blurbLinks,

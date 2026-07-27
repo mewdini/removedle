@@ -67,10 +67,9 @@
 </script>
 
 <div class="flex w-full flex-col items-center justify-center gap-2 pt-4 align-middle">
-    <!-- Sized to match the outlined wordmark it replaced: that SVG rendered at
-         h-10 / sm:h-15, so its glyphs were 40px and 60px tall. Poppins caps are
-         roughly 0.72em, hence 56px / 84px here. -->
-    <Logo class="text-[3.5rem] text-theme-text sm:text-[5.25rem]" />
+    <!-- The type scale lives in Logo.svelte, which varies it by which name it is
+         rendering (the janedle alias is nearly twice as long). -->
+    <Logo class="text-theme-text" />
     <span class="px-4 text-center">
         <!-- The citation runs on from the quote rather than taking a line of its
              own, to keep the header stack short. A span rather than a p because

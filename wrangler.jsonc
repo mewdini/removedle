@@ -20,6 +20,46 @@
     // unreleased branch would write real rows into challengeStats via saveScore.
     "workers_dev": false,
     "preview_urls": false,
+    // Both hostnames are Workers Custom Domains on this one Worker, so each owns
+    // its zone's apex DNS record and Cloudflare manages the cert. removedle.org
+    // is canonical and serves the game; janedle.org is an alias that ONLY
+    // redirects to it, in the handle hook in src/hooks.server.ts.
+    //
+    // The alias must never serve the game: localStorage is per-origin and holds
+    // the board, streak and stats, so a second serving origin would silently
+    // fork every player's save. See ALT_HOST in src/lib/statics.ts.
+    //
+    // It is bound as a custom domain (rather than left to a zone-level Cloudflare
+    // Redirect Rule) because the redirect has to add a query marker while
+    // preserving any existing query string, which the rule expression language
+    // does not do cleanly. The tradeoff is that the alias invokes the Worker to
+    // serve a redirect. A Redirect Rule would be cheaper if that ever matters.
+    //
+    // removedle.org was originally created in the dashboard and is listed here so
+    // this file is the full picture -- wrangler treats an existing domain already
+    // bound to this same Worker as a no-op, it does not recreate it.
+    //
+    // NOTE: WAF rate limiting rules are scoped per ZONE, so the removedle.org
+    // rule (limit-game-requests: 20 requests / 10s per IP, blocking for 10s,
+    // matching everything outside /_app/) does not cover janedle.org. The alias
+    // zone carries its own copy of that rule. The exposure if it ever lapses is
+    // small -- the alias only ever 301s, and the 301 downgrades a POST to a GET
+    // so saveScore cannot run there -- but the redirect is still a Worker
+    // invocation, and Free plan allows only one such rule per zone.
+    // NOTE ON ORDER: `wrangler dev` simulates requests as arriving at the FIRST
+    // route's hostname and rewrites the Host header to match, so a local curl
+    // cannot reach the alias branch of the handle hook while removedle.org leads.
+    // To exercise the redirect locally, temporarily move janedle.org first.
+    "routes": [
+        {
+            "pattern": "removedle.org",
+            "custom_domain": true
+        },
+        {
+            "pattern": "janedle.org",
+            "custom_domain": true
+        }
+    ],
     "observability": {
         "enabled": true
     },
