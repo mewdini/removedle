@@ -43,6 +43,10 @@
     const hasBlurbLinks = $derived(
         Object.values(blurbLinks).some((v: unknown) => typeof v === 'string' && v.trim())
     );
+    // Hover stays in CSS; this is only the tap path. A CSS-only group-hover reveal
+    // (what the 404 citation does) leaves the links permanently unreachable on a
+    // phone, since there is no hover and tapping a span focuses nothing.
+    let blurbToggled = $state(false);
 
     // The mode switcher is navigation, not a setting: the URL is the source of
     // truth, so these are plain anchors that work without JS and stay on the
@@ -70,6 +74,10 @@
     <!-- The type scale lives in Logo.svelte, which varies it by which name it is
          rendering (the janedle alias is nearly twice as long). -->
     <Logo class="text-theme-text" />
+    <!-- The byline belongs to the wordmark, not to the tagline: under the tagline
+         it sat directly beneath the song citation and read as a credit for the
+         song itself. -->
+    <p class="text-sm text-theme-text">by mewdini</p>
     <span class="px-4 text-center">
         <!-- The citation runs on from the quote rather than taking a line of its
              own, to keep the header stack short. A span rather than a p because
@@ -77,33 +85,34 @@
         <span class="block text-lg text-theme-text">
             {currentMode.blurb}
             {#if currentMode.blurbSong}
-                <span
-                    class="inline-flex items-center gap-1.5 align-middle text-xs text-theme-muted italic [&_a]:h-4 [&_a]:w-4"
-                >
-                    from “{currentMode.blurbSong}”
+                <span class="group inline-block align-middle text-xs text-theme-muted italic">
                     {#if hasBlurbLinks}
-                        <StreamingLinks links={blurbLinks} inGame={false} />
+                        <button
+                            type="button"
+                            class="cursor-pointer italic underline decoration-dotted underline-offset-2"
+                            aria-expanded={blurbToggled}
+                            onclick={() => (blurbToggled = !blurbToggled)}
+                            >from “{currentMode.blurbSong}”</button
+                        >
+                        <!-- Expands in flow, same as the 404 citation. Floating it
+                             over the header instead would drop the links onto the
+                             mode toggle sitting right below. Focus is scoped to the
+                             links rather than the whole group, or focusing the
+                             button would hold it open and break the second tap. -->
+                        <span
+                            class="block overflow-hidden transition-all duration-200 group-hover:mt-1 group-hover:max-h-8 group-hover:opacity-100 has-[a:focus]:mt-1 has-[a:focus]:max-h-8 has-[a:focus]:opacity-100 {blurbToggled
+                                ? 'mt-1 max-h-8 opacity-100'
+                                : 'max-h-0 opacity-0'}"
+                        >
+                            <StreamingLinks links={blurbLinks} inGame={false} />
+                        </span>
+                    {:else}
+                        from “{currentMode.blurbSong}”
                     {/if}
                 </span>
             {/if}
         </span>
-        <p class="text-sm text-theme-text">by mewdini</p>
     </span>
-    <nav
-        aria-label="Game mode"
-        class="flex flex-row gap-0.5 rounded-full border border-theme-muted p-0.5"
-    >
-        {#each MODE_LIST as m (m.id)}
-            <a
-                href={modeHref(m)}
-                aria-current={m.id === currentMode.id ? 'page' : undefined}
-                class="rounded-full px-4 py-1 text-sm font-bold transition-all active:scale-95 {m.id ===
-                currentMode.id
-                    ? 'bg-theme-accent text-theme-text'
-                    : 'text-theme-muted hover:text-theme-text'}">{m.label}</a
-            >
-        {/each}
-    </nav>
     <div class="flex flex-row items-center gap-2 text-theme-text">
         <span class="flex items-center transition-all hover:scale-105 active:scale-95"
             ><a href={resolve('/[[mode=mode]]/archive', { mode: modeParam(currentMode) })}
@@ -190,6 +199,28 @@
 >
     <div class="flex flex-col gap-4 text-theme-text">
         <span class="text-xl font-bold">Settings</span>
+
+        <div class="flex flex-col gap-2">
+            <span class="text-sm font-bold">Game mode</span>
+            <!-- Sits with the settings but is not one: these stay plain anchors
+                 so the URL remains the source of truth, which means picking a
+                 mode navigates and closes the modal with it. -->
+            <nav
+                aria-label="Game mode"
+                class="flex flex-row gap-0.5 self-center rounded-full border border-theme-muted p-0.5"
+            >
+                {#each MODE_LIST as m (m.id)}
+                    <a
+                        href={modeHref(m)}
+                        aria-current={m.id === currentMode.id ? 'page' : undefined}
+                        class="rounded-full px-4 py-1 text-sm font-bold transition-all active:scale-95 {m.id ===
+                        currentMode.id
+                            ? 'bg-theme-accent text-theme-text'
+                            : 'text-theme-muted hover:text-theme-text'}">{m.label}</a
+                    >
+                {/each}
+            </nav>
+        </div>
 
         <div class="flex flex-col gap-2">
             <label for="theme-select" class="text-sm font-bold">Theme</label>
