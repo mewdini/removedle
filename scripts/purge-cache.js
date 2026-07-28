@@ -2,7 +2,8 @@
 // change content that is already live and cached:
 //   - reissuing a released day's challenge audio (snippets are served
 //     `immutable`, so a stale copy would otherwise persist until its TTL), or
-//   - updating a non-hashed static asset (e.g. static/favicon.png).
+//   - updating a non-hashed static asset (e.g. static/favicon.ico, or a
+//     manifest in the data bucket).
 //
 // It is deliberately NOT part of the deploy. A normal code deploy never needs a
 // purge: the /_app/immutable/* assets are content-hashed, so a new build gets

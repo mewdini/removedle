@@ -70,31 +70,35 @@ const manifest = {
             type: 'image/png',
             purpose: 'any',
         },
-        // `maskable` gets purpose-built files, and they are deliberately NOT
-        // the same images with "any maskable" bolted onto one entry.
+        // `maskable` gets its own files rather than "any maskable" on one entry,
+        // because the two purposes need different alpha handling (see below).
         //
-        // Android masks home-screen and shortcut icons to a circle (or a
-        // launcher-chosen squircle). Given only non-maskable icons it cannot
-        // know which pixels are safe to lose, so it shrinks the whole image to
-        // sit *inscribed* in the circle and pads the rest -- which is exactly
-        // the "our favicon renders too small inside the circle" report this
-        // exists to fix.
+        // Android masks home-screen icons to a circle or a launcher-chosen
+        // squircle. Given only non-maskable icons it cannot know which pixels
+        // are safe to lose, so it shrinks the whole image to sit *inscribed* in
+        // the mask and pads the rest -- the "renders too small inside the
+        // circle" report this exists to fix.
         //
-        // The maskable spec's guarantee is only the central circle of 80%
-        // diameter; the outer ~10% on every edge may be cropped. The source
-        // artwork is full-bleed (the character's hair and hands reach the
-        // canvas edge), so declaring it maskable as-is would have a circular
-        // mask slice off the top of the hair, both outer curls and both hands.
-        // These files are therefore the artwork rescaled to 80% and centred on
-        // an opaque #FAFAFA field -- the artwork's own background colour, so
-        // the inset reads as more of the illustration's white margin rather
-        // than as a coloured frame around a smaller icon. (The theme blue
-        // #799ec0 was tried and looks like an icon inside an icon: a white
-        // rounded card floating on a blue plate.)
+        // These are the artwork FULL-BLEED, not inset. The first version scaled
+        // it to the 80% safe zone on an opaque field, reasoning that the spec
+        // only guarantees the central 80% and a crop would clip the hair and
+        // hands. That was the wrong trade and the installed icon proved it: an
+        // inset on an opaque background is indistinguishable from the padding
+        // the mask already adds, so the launcher showed the art floating in a
+        // white squircle -- the very thing being fixed, reintroduced one layer
+        // in. Ink coverage was 11.4%; full-bleed is 20.6%.
         //
-        // Opaque to the edge on purpose. A maskable icon with transparent
-        // pixels has nothing for the launcher to mask, and Android renders the
-        // gaps as black.
+        // What the crop actually costs is white margin and the outermost red
+        // splatter. The character survives it, and losing a little of the outer
+        // artwork is the price of the icon reading as an icon at launcher size.
+        // Cropping is also what the spec expects you to design for: the safe
+        // zone is a promise about what SURVIVES, not an instruction to leave
+        // the rest empty.
+        //
+        // Opaque to the edge on purpose -- the source artwork's transparent
+        // rounded corners are flattened onto its own #FAFAFA canvas colour. A
+        // maskable icon with transparent pixels has nothing for the launcher to
+        // mask, and Android renders the gaps as black.
         {
             src: maskable192,
             sizes: '192x192',

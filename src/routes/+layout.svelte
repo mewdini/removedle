@@ -124,7 +124,14 @@
     <meta name="twitter:description" content={pageDescription} />
     <meta name="twitter:image" content={previewImage} />
 
-    <link rel="icon" href={SITE + '/favicon.png'} />
+    <!-- Every icon below declares its size. There used to be a bare
+         <link rel="icon"> here with no `sizes` and an absolute SITE URL: it gave
+         icon-picking user agents nothing to rank it by, and because the href was
+         hardcoded to production, localhost and preview fetched the site icon
+         cross-origin from the live site. It pointed at static/favicon.png, which
+         was a byte-identical copy of favicon-512x512.png, so 329 KB shipped
+         twice. Removed with the file; /favicon.ico still covers the bare
+         convention request. -->
     <link rel="icon" type="image/png" sizes="32x32" href={favicon32} />
     <!-- iOS does not read the web app manifest for home-screen icons, so this
          tag is the only thing that feeds it and it needs its own file. The one
