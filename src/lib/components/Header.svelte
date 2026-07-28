@@ -165,7 +165,7 @@
             <img src={icon128} alt="removedle icon" class="h-[100px] rounded-xl" />
             <p class="text-theme-text">
                 Icon sourced from <a
-                    class="hover:underline"
+                    class="text-theme-muted underline decoration-dotted underline-offset-2"
                     target="_blank"
                     href="https://www.nts.live/shows/deadair-transmissions/episodes/deadair-transmissions-15th-august-2025"
                     >deadAir - Transmissions w/ Jane Remover</a
@@ -175,14 +175,14 @@
         <p class="text-theme-text">
             <b>removedle</b> is a fork of
             <a
-                class="hover:underline"
+                class="text-theme-muted underline decoration-dotted underline-offset-2"
                 target="_blank"
                 rel="noopener noreferrer"
                 href="https://github.com/angelolz/underscordle"><i>underscordle</i></a
             >
             by
             <a
-                class="hover:underline"
+                class="text-theme-muted underline decoration-dotted underline-offset-2"
                 target="_blank"
                 rel="noopener noreferrer"
                 href="https://github.com/angelolz">angelolz</a

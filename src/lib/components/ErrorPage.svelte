@@ -25,9 +25,11 @@
             </div>
         {/if}
         <p class="mt-1 text-sm">Can't find what you're looking for!</p>
-        <a class="my-2 inline-flex items-center gap-2 hover:underline" href={resolve('/')}>
+        <!-- white/70 rather than theme-muted: this card sets its own palette so it
+             reads the same whichever theme the 404 is hit under. -->
+        <a class="my-2 inline-flex items-center gap-2 text-white/70" href={resolve('/')}>
             <AngleLeftOutline class="h-4 w-4 shrink-0" />
-            <span>Go Home</span>
+            <span class="underline decoration-dotted underline-offset-2">Go Home</span>
         </a>
     </div>
 </div>

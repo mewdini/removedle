@@ -142,7 +142,7 @@
                         />
                         <div class="flex flex-col gap-1">
                             <button
-                                class="flex cursor-pointer items-center gap-1 text-left transition-opacity hover:underline hover:opacity-80 focus:outline-none"
+                                class="flex cursor-pointer items-center gap-1 text-left transition-opacity hover:opacity-80 focus:outline-none"
                                 onclick={() => toggleSong(i)}
                                 aria-expanded={expandedSongs[i]}
                             >
@@ -158,7 +158,13 @@
                                 >
                                     <polyline points="9 18 15 12 9 6"></polyline>
                                 </svg>
-                                <span class="text-sm font-semibold">{song?.title}</span>
+                                <!-- Dotted like the other reveal controls, but NOT
+                                     greyed: this is the revealed answer, so it stays
+                                     at full text colour. -->
+                                <span
+                                    class="text-sm font-semibold underline decoration-dotted underline-offset-2"
+                                    >{song?.title}</span
+                                >
                             </button>
                             {#if expandedSongs[i]}
                                 <div transition:slide={{ duration: 200 }} class="overflow-hidden">
@@ -218,7 +224,11 @@
                 </span>
             {/if}
         </div>
-        <div class="flex flex-col">
+        <!-- Share and the Challenger hand-off are peer actions on the same row,
+             split by a rule. As a full-width banner below the card the hand-off
+             read as an ad for another product rather than as something to do
+             next. -->
+        <div class="flex flex-row items-center justify-center gap-3">
             <button
                 class="flex shrink-0 cursor-pointer flex-row items-center justify-around gap-1 rounded-full bg-theme-accent px-3 py-2 align-middle text-[10px] whitespace-nowrap text-white ring ring-theme-text transition-all hover:opacity-80 hover:ring-2 active:scale-95 sm:text-[14px]"
                 onclick={() => {
@@ -228,30 +238,35 @@
                 <ShareNodesOutline class="h-4 w-4 shrink-0 text-theme-text sm:h-5 sm:w-5" />
                 <span class="text-theme-text">{copyText}</span>
             </button>
+            {#if mode.id === MODES.normal.id}
+                <div class="h-6 w-px shrink-0 bg-theme-muted opacity-40" aria-hidden="true"></div>
+                <!-- Same pill as Share so the pair reads as one control group, but
+                     outlined rather than filled: a second accent-filled button
+                     would compete with the primary action. Links to the explicit
+                     date rather than /challenger, so finishing an archive day
+                     sends you to the same day in the other mode. -->
+                <a
+                    class="flex shrink-0 flex-row items-center justify-around gap-1 rounded-full px-3 py-2 align-middle text-[10px] whitespace-nowrap text-theme-text ring ring-theme-muted transition-all hover:opacity-80 hover:ring-2 active:scale-95 sm:text-[14px]"
+                    href={resolve('/[[mode=mode]]/[date=date]', {
+                        mode: modeParam(MODES.challenger),
+                        date,
+                    })}
+                >
+                    <span>Try {MODES.challenger.label}</span>
+                    <AngleRightOutline class="h-4 w-4 shrink-0 sm:h-5 sm:w-5" />
+                </a>
+            {/if}
         </div>
     </div>
-    {#if mode.id === MODES.normal.id}
-        <!-- Links to the explicit date rather than /challenger, so finishing an
-             archive day sends you to the same day in the other mode. -->
-        <a
-            class="flex w-full max-w-[500px] flex-row items-center justify-center gap-2 rounded-xl border border-theme-accent bg-theme-accent/15 px-4 py-3 text-theme-text transition-all hover:bg-theme-accent/30 active:scale-[0.98]"
-            href={resolve('/[[mode=mode]]/[date=date]', {
-                mode: modeParam(MODES.challenger),
-                date,
-            })}
-        >
-            <span class="text-sm font-bold">Try {MODES.challenger.label} Mode</span>
-            <span class="hidden text-xs text-theme-muted sm:inline">
-                {MODES.challenger.blurb}
-            </span>
-            <AngleRightOutline class="h-4 w-4 shrink-0" />
-        </a>
-    {/if}
+    <!-- The underline sits on the text rather than the anchor so it does not run
+         under the chevron, which is part of the affordance, not of the label. -->
     <a
-        class="flex flex-row items-center justify-center gap-0.5 text-theme-text hover:underline"
+        class="flex flex-row items-center justify-center gap-0.5 text-theme-muted"
         href={resolve('/[[mode=mode]]/archive', { mode: modeParam(mode) })}
     >
         <AngleLeftOutline class="h-4 w-4 shrink-0" />
-        <p>{isToday ? 'Play past games' : 'Back to archive'}</p>
+        <p class="underline decoration-dotted underline-offset-2">
+            {isToday ? 'Play past games' : 'Back to archive'}
+        </p>
     </a>
 </div>

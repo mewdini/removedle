@@ -345,11 +345,11 @@
     >
         <p>No challenge found for this date. Please let mewdini know about this!</p>
         <a
-            class="flex flex-row items-center gap-1 text-sm hover:underline"
+            class="flex flex-row items-center gap-1 text-sm text-theme-muted"
             href={resolve('/[[mode=mode]]/archive', { mode: modeParam(mode) })}
         >
             <AngleLeftOutline class="h-4 w-4 shrink-0" />
-            <p>Play past games</p>
+            <p class="underline decoration-dotted underline-offset-2">Play past games</p>
         </a>
     </div>
 {:else}
