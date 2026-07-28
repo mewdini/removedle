@@ -7,6 +7,17 @@ export interface Song {
     album: string;
     links: StreamingLinks;
     /**
+     * When the recording came out, read from the master's tags by
+     * scripts/scan-songs.js. Carries whatever precision the tag had -- `YYYY`,
+     * `YYYY-MM` or `YYYY-MM-DD` -- so it is never more confident than the source.
+     *
+     * Optional, and genuinely often absent: 9 of challenger's 48 masters are
+     * leaks and demos with no usable date tag at all, and any manifest published
+     * before this field existed has none either. Sort with releaseKey(), which
+     * pads the partial forms and sends "unknown" to the end of the list.
+     */
+    releaseDate?: string;
+    /**
      * Catalog provenance, stamped by scripts/scan-songs.js and used only by the
      * catalog browser. All optional: a manifest published before these existed
      * simply has none, and every consumer treats that as "no badge".

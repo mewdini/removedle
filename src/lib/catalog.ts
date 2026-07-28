@@ -56,13 +56,35 @@ export function describeAge(date: string, today: string): string {
 }
 
 /**
- * The most recent thing that happened to a track, for the "Newest" ordering.
+ * The most recent thing that happened to a track, for the "Updated" ordering.
  * Sorts on both stamps rather than just `addedAt`, or a retitle -- half the
  * point of the changelist -- would never move a track up the list.
  */
 export function lastTouched(song: Song): string {
     const dates = [song.addedAt, song.updatedAt].filter(Boolean) as string[];
     return dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : '';
+}
+
+/**
+ * Comparable form of `releaseDate`, or '' when the track has none.
+ *
+ * The field keeps the tag's own precision, and a plain string compare would rank
+ * a bare "2023" ahead of every dated day in 2023 purely for being the shorter
+ * string -- so "2023" would land in the wrong half of its own year. Padding the
+ * missing components with `-00` pins an imprecise date to the start of its year,
+ * which is the conventional reading and, more to the point, is deterministic.
+ */
+export function releaseKey(song: Song): string {
+    if (!song.releaseDate) return '';
+    return `${song.releaseDate}-00-00`.slice(0, 10);
+}
+
+/**
+ * The year for the catalog row. Only ever the year: the month and day are what
+ * make the field sortable, not something worth spending a row's width on.
+ */
+export function releaseYear(song: Song): string | null {
+    return song.releaseDate ? song.releaseDate.slice(0, 4) : null;
 }
 
 /** What actually changed, for the line under an `updated` track. */
@@ -78,6 +100,13 @@ export function describeChange(song: Song): string | null {
  * NOT the fuzzy Searcher the game uses: fuzzy matching is right when you are
  * guessing a half-remembered title, but when you are browsing a list you have
  * in front of you it returns rows that look like noise.
+ *
+ * The artist field is matched but NOT advertised in the placeholder. This is a
+ * game about one artist, so "search by artist" promises something the catalog
+ * cannot deliver -- every normal-mode row is "Jane Remover", and the second name
+ * on a challenger remix ("Charli XCX - I Finally Understand (remix)") lives in
+ * the TITLE, not here. Keeping the clause costs nothing and quietly helps anyone
+ * who types a name anyway.
  */
 export function matchesQuery(song: Song, query: string): boolean {
     const q = query.trim().toLowerCase();

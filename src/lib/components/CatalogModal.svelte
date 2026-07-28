@@ -19,6 +19,8 @@
         lastTouched,
         matchesQuery,
         RECENT_WINDOW_DAYS,
+        releaseKey,
+        releaseYear,
         type CatalogFlag,
     } from '$lib/catalog';
     import { getGameDate } from '$params/date';
@@ -37,9 +39,29 @@
     // published in the evening is not immediately described as "yesterday".
     const today = getGameDate();
 
+    type SortKey = 'title' | 'album' | 'release' | 'recent';
+
+    // Four pills rather than a <select>: at these labels the row is ~230px wide,
+    // which still clears the narrowest case (a 320px viewport gives the modal
+    // body 264px, after mx-3 and p-4), and on mobile it sits on its own line
+    // under the search box. Labels are kept to one short word for that budget.
+    //
+    // "Updated", not "Newest": there are two different dates on this screen and
+    // "Newest" names neither of them unambiguously -- next to a "Year" pill it
+    // reads as "the newest MUSIC", which is what Year already does. These two
+    // sorts genuinely disagree (a 2018 demo added last week is the oldest track
+    // and the newest entry), so the labels have to say which date they mean.
+    // Each pill also carries a title attribute spelling it out in full.
+    const SORTS = [
+        ['title', 'A-Z', 'Sort by title'],
+        ['album', 'Album', 'Sort by album, then by title within it'],
+        ['release', 'Year', 'Sort by release date, newest music first'],
+        ['recent', 'Updated', 'Sort by what was most recently added to or changed in the catalog'],
+    ] as const satisfies readonly (readonly [SortKey, string, string])[];
+
     let browsingId = $state<ModeId>(MODES.normal.id);
     let query = $state('');
-    let sort = $state<'title' | 'recent'>('title');
+    let sort = $state<SortKey>('title');
     let loading = $state(false);
     let loadError = $state(false);
 
@@ -103,22 +125,73 @@
             )
     );
 
+    const byTitle = (a: Song, b: Song) =>
+        a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+
+    // Every ordering falls back to title, so rows that tie -- two tracks off the
+    // same album, or two loosies from the same year -- keep a stable, readable
+    // order instead of whatever the input array happened to hold.
     const ordered = $derived(
-        [...matches].sort((a, b) =>
-            sort === 'title'
-                ? a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
-                : lastTouched(b).localeCompare(lastTouched(a)) ||
-                  a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
-        )
+        [...matches].sort((a, b) => {
+            switch (sort) {
+                case 'album':
+                    // Under challenger's singlesAsOwnAlbum every loosie is its own
+                    // one-track "album" named after the track, so this degenerates
+                    // to a title sort over there. That is the honest answer for a
+                    // catalog with no albums in it, not a case to special-case.
+                    return (
+                        a.album.localeCompare(b.album, undefined, { sensitivity: 'base' }) ||
+                        byTitle(a, b)
+                    );
+                case 'release': {
+                    // Newest release first, matching the direction of "Updated".
+                    // Tracks with no date go to the END: an empty sort key would
+                    // otherwise lead the list, and 9 blank rows above everything
+                    // reads as a bug rather than as missing metadata.
+                    const ka = releaseKey(a);
+                    const kb = releaseKey(b);
+                    if (!ka || !kb) return ka === kb ? byTitle(a, b) : ka ? -1 : 1;
+                    return kb.localeCompare(ka) || byTitle(a, b);
+                }
+                case 'recent':
+                    return lastTouched(b).localeCompare(lastTouched(a)) || byTitle(a, b);
+                default:
+                    return byTitle(a, b);
+            }
+        })
     );
 
-    // The changelist is a shortcut to the top of an A-Z list. Under "Newest" the
-    // whole list already leads with the same tracks, so repeating them would just
-    // push the catalog down the page.
-    const showRecent = $derived(sort === 'title' && !query.trim() && flagged.length > 0);
+    // The changelist is a shortcut to the top of a list that does not otherwise
+    // surface recent changes -- A-Z, album and release order all scatter them.
+    // Under "Updated" the list already leads with the same tracks, so repeating
+    // them would only push the catalog down the page.
+    const showRecent = $derived(sort !== 'recent' && !query.trim() && flagged.length > 0);
 
     function albumOf(song: Song) {
         return albums.find((a: AlbumArt) => a.name === song.album);
+    }
+
+    /**
+     * The "artist · album · year" line under a title, as the segments that
+     * actually have something to say.
+     *
+     * The artist is dropped when the track is credited solely to the mode's
+     * primary artist, which is almost all of them: this is a game about one
+     * artist, so "Jane Remover" on every row is the least informative thing on
+     * the screen and it pushes the album and year along. It reappears the moment
+     * a track credits somebody else -- "Jane Remover, Lucy Bedroque" -- which is
+     * the only time the field tells you anything. Compared case-insensitively
+     * and trimmed, so a stray tag variant does not resurrect it on one row.
+     */
+    function metaParts(song: Song, album: AlbumArt | undefined, year: string | null) {
+        const parts: { key: string; text: string }[] = [];
+        const artist = song.artist?.trim() ?? '';
+        if (artist && artist.toLowerCase() !== browsing.primaryArtist.toLowerCase()) {
+            parts.push({ key: 'artist', text: artist });
+        }
+        if (album && !album.isSingle) parts.push({ key: 'album', text: song.album });
+        if (year) parts.push({ key: 'year', text: year });
+        return parts;
     }
 </script>
 
@@ -137,6 +210,7 @@
 {#snippet row(song: Song, flag: CatalogFlag | null)}
     {@const album = albumOf(song)}
     {@const change = flag === 'updated' ? describeChange(song) : null}
+    {@const year = releaseYear(song)}
     <li class="flex flex-row gap-3 py-2">
         <AlbumArtComponent
             albumName={song.album}
@@ -151,14 +225,25 @@
                     {@render badge(flag, flagDate(song, flag))}
                 {/if}
             </div>
-            <!-- Non-breaking spaces around the separator, not plain ones: Svelte
-                 trims whitespace at the start of a block, so a literal space
-                 there disappears and it renders "Jane Remover· Teen Week". They
-                 also keep the dot from wrapping onto a line of its own. -->
+            <!-- Built as parts and joined, rather than as inline {#if}s around a
+                 literal separator. Every segment here is optional now -- the
+                 artist is omitted on the ~135 tracks credited solely to the
+                 primary artist, the album on a one-track "album", the year on a
+                 master with no date tag -- and hand-placed separators would
+                 leave a leading "· Teen Week" the moment the first one dropped.
+
+                 Non-breaking spaces around the dot, not plain ones: Svelte trims
+                 whitespace at the start of a block, so a literal space there
+                 disappears and it renders "Jane Remover· Teen Week". They also
+                 keep the dot from wrapping onto a line of its own. The album
+                 keeps its italics, so the parts are rendered rather than joined
+                 into one string. -->
             <span class="text-[11px] text-theme-muted">
-                {song.artist}{#if album && !album.isSingle}&nbsp;·&nbsp;<span class="italic"
-                        >{song.album}</span
-                    >{/if}
+                {#each metaParts(song, album, year) as part, i (part.key)}
+                    {#if i > 0}&nbsp;·&nbsp;{/if}{#if part.key === 'album'}<span class="italic"
+                            >{part.text}</span
+                        >{:else}{part.text}{/if}
+                {/each}
             </span>
             {#if change}
                 <span class="text-[11px] text-theme-muted italic">{change}</span>
@@ -200,19 +285,27 @@
         </div>
 
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <!-- Not "artist": this is a game about one artist, so offering to
+                 search by it promises something the list cannot give you. The
+                 second name on a challenger remix ("Charli XCX - I Finally
+                 Understand (remix)") lives in the title. matchesQuery still
+                 checks the artist field anyway -- see the note there. -->
             <input
                 type="search"
-                placeholder="Search title, artist or album"
-                aria-label="Search the catalog"
+                placeholder="Search by title or album"
+                aria-label="Search the catalog by title or album"
                 bind:value={query}
                 class="min-w-0 flex-1 rounded-lg border border-theme-text bg-theme-bg p-2 text-sm text-theme-text outline-none focus:ring-2 focus:ring-theme-accent"
             />
             <div
+                role="group"
+                aria-label="Sort the catalog"
                 class="flex shrink-0 flex-row gap-0.5 self-start rounded-full border border-theme-muted p-0.5"
             >
-                {#each [['title', 'A-Z'], ['recent', 'Newest']] as const as [value, label] (value)}
+                {#each SORTS as [value, label, hint] (value)}
                     <button
                         type="button"
+                        title={hint}
                         aria-pressed={sort === value}
                         onclick={() => (sort = value)}
                         class="cursor-pointer rounded-full px-3 py-1 text-xs font-bold transition-all active:scale-95 {sort ===

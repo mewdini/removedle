@@ -16,6 +16,12 @@ const MODE = parseMode();
 const DIRS = modeDirs(MODE);
 
 const MASTERS_DIR = DIRS.masters;
+// The RAW tagged sources (masters/), not the converted out/masters/*.m4a this
+// script otherwise walks. ffmpeg drops tags on FLAC -> m4a, so a few fields can
+// only be read here -- see resolveReleaseDate, and readIsrc in resolve-links.js
+// for the same trick. Local only: `push-masters` uploads out/masters, never
+// these, so on CI this directory does not exist at all.
+const SRC_MASTERS_DIR = DIRS.srcMasters;
 const DATA_DIR = DIRS.data;
 const COVER_DIR = DIRS.covers;
 const REGISTRY_FILE = path.join(DATA_DIR, 'song-registry.json');
@@ -91,6 +97,131 @@ function trackProvenance(existingEntry, title, albumName) {
         retitled: false,
         rebadged: false,
     };
+}
+
+// A readable credit list from whatever the tag actually holds.
+//
+// The source masters tag collaborations properly, as a MULTI-VALUE Vorbis ARTIST
+// field (["Jane Remover", "Lucy Bedroque"]). ffmpeg cannot represent that in m4a,
+// so converting flattens it to a single semicolon-joined string -- and since this
+// script reads out/masters/*.m4a, that flattened form is what reached the catalog:
+// two tracks rendered "Jane Remover;Lucy Bedroque" and "Jane Remover;Tinashe" in
+// the browser. Same family as the ISRC and originaldate losses noted above; the
+// tags are not wrong, the conversion is lossy.
+//
+// Deliberately normalised here rather than read back from the source master. The
+// source array is not ordered the way the credit reads -- "Nasty (Match My Tweak)"
+// tags ["Tinashe", "Jane Remover"], which would credit Tinashe first -- whereas the
+// flattened m4a preserves the intended order. Normalising also keeps working on a
+// CI runner, which pulls only out/masters and has no source files at all.
+function normalizeArtist(value) {
+    return (
+        String(value)
+            .split(';')
+            .map((part) => part.trim())
+            .filter(Boolean)
+            .join(', ') || 'Unknown Artist'
+    );
+}
+
+// When the recording came out, for the catalog browser's release-date sort.
+//
+// Priority is originaldate > date > year, and the order matters -- for album
+// tracks `year`/`date` are frequently the REISSUE or tagging year while
+// `originaldate` carries the real one. "Census Designated - 02 - Lips.flac" tags
+// year 2024 and date 2024-01-01, but the record came out 2023-10-20, which is
+// exactly what its originaldate says.
+//
+// Coverage is uneven and that is fine: masters/ has year on 89/89 and
+// originaldate on 68/89, masters/challenger/ has year on 39/48 and originaldate
+// on none, so most challenger tracks resolve to a bare year and 9 resolve to
+// nothing at all. The field is left off entirely in that case (undefined keys
+// drop out of JSON.stringify) and the client sorts those to the end.
+function normalizeReleaseDate(value) {
+    if (value === undefined || value === null) return undefined;
+    // Both ID3 and Vorbis allow YYYY, YYYY-MM and YYYY-MM-DD, and taggers append
+    // a time component ("2023-10-20T00:00:00Z") often enough to be worth
+    // tolerating. Anything not starting with a plausible year is dropped rather
+    // than guessed at -- a wrong date sorts silently, which is the worst kind.
+    const match = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?/.exec(String(value).trim());
+    if (!match) return undefined;
+    const [, year, month, day] = match;
+    if (Number(year) < 1900 || Number(year) > 2999) return undefined;
+    if (month && day) return `${year}-${month}-${day}`;
+    if (month) return `${year}-${month}`;
+    return year;
+}
+
+// Base name -> source master path, built once. A missing directory is the normal
+// CI case, not an error: `push-masters` only ever uploads out/masters, so a
+// runner that ran `pull-masters` has the m4a copies and no sources whatsoever.
+// Same shape as sourcePath() in resolve-links.js.
+let sourceByBase = null;
+let warnedNoSources = false;
+async function sourcePath(filename) {
+    if (!sourceByBase) {
+        sourceByBase = {};
+        try {
+            for (const f of await fs.readdir(SRC_MASTERS_DIR)) {
+                sourceByBase[f.replace(/\.[^.]+$/, '')] = path.join(SRC_MASTERS_DIR, f);
+            }
+        } catch {
+            // Warn once and carry on. A scan must stay possible on a machine
+            // without the sources -- it just falls back to the registry below.
+            warnedNoSources = true;
+            console.warn(
+                `\n⚠ No source masters at ${SRC_MASTERS_DIR}.\n` +
+                    '  Release dates will be carried forward from the registry only; tag edits\n' +
+                    '  to originaldate/date/year cannot be seen from here.\n'
+            );
+        }
+    }
+    return sourceByBase[filename.replace(/\.[^.]+$/, '')] || null;
+}
+
+// Resolve one track's release date, and say WHERE it came from so the run can
+// report the split.
+//
+// Read from the SOURCE master, never from the converted out/masters/*.m4a this
+// script walks. ffmpeg drops `originaldate` on FLAC -> m4a, so the m4a's tags are
+// always a subset of the source's -- the priority chain silently falls through to
+// `date` there and every album track resolves to its tagging year (Lips came out
+// as 2024-01-01 instead of 2023-10-20). The m4a can therefore never supply a
+// value the source did not already have, which is why there is no m4a fallback
+// at all: its only possible contribution is a value that is known to be wrong.
+//
+// When the source is unreachable, carry the registry's existing value forward
+// untouched. This is NOT a hole in the "tags are the source of truth, fix it at
+// the tag" rule -- it is the same precedent as `entry.isrc`, which
+// resolve-links.js persists into the registry for exactly this reason: the m4a
+// cannot carry the tag, so the registry is where the value lives. Without it the
+// Sync Metadata workflow (which pulls m4a masters and re-scans) would recompute
+// every date from tags it cannot see and wipe a correct local scan.
+//
+// The source WINS over the persisted value when both exist, which is the one
+// place this differs from readIsrc's "persisted first". An ISRC never changes; a
+// release date is a tag that can be corrected, and a fix has to be able to land.
+async function resolveReleaseDate(filename, existingEntry) {
+    const src = await sourcePath(filename);
+    if (src) {
+        try {
+            const tags = (await mm.parseFile(src)).common;
+            for (const candidate of [tags.originaldate, tags.date, tags.year]) {
+                const normalized = normalizeReleaseDate(candidate);
+                if (normalized) return { releaseDate: normalized, from: 'source' };
+            }
+            // The source really has no usable date. Fall through rather than
+            // returning: a value already in the registry (hand-checked, or read
+            // before a re-tag stripped it) is better than dropping the field.
+        } catch (err) {
+            console.warn(`  Could not read tags from ${path.basename(src)}: ${err.message}`);
+        }
+    }
+
+    if (existingEntry?.releaseDate) {
+        return { releaseDate: existingEntry.releaseDate, from: 'carried' };
+    }
+    return { releaseDate: undefined, from: 'none' };
 }
 
 async function getFileHash(filePath) {
@@ -236,6 +367,10 @@ async function scanSongs() {
 
         const songList = [];
         const albumsMap = new Map();
+        // Where each release date came from. Reported at the end so a run that
+        // silently lost the sources (CI, or a machine without masters/) is
+        // visible as a wall of "carried" rather than passing for a clean scan.
+        const dateSources = { source: 0, carried: 0, none: 0 };
 
         await fs.mkdir(path.dirname(SONGLIST_OUTPUT_FILE), { recursive: true });
         await fs.mkdir(COVER_DIR, { recursive: true });
@@ -249,7 +384,7 @@ async function scanSongs() {
                 const metadata = await mm.parseFile(fullPath);
                 const title = metadata.common.title || path.basename(file, ext);
                 const albumName = effectiveAlbum(metadata.common.album || 'Unknown Album', title);
-                const artist = metadata.common.artist || 'Unknown Artist';
+                const artist = normalizeArtist(metadata.common.artist || 'Unknown Artist');
                 const duration = Math.floor(metadata.format.duration * 1000) / 1000;
                 const contentHash = await getFileHash(fullPath);
 
@@ -299,6 +434,14 @@ async function scanSongs() {
                     console.log(`  New song detected. Assigned ID: ${foundId}`);
                 }
 
+                // Needs the matched entry, so it runs after identification: the
+                // registry is the fallback when the source master is unreachable.
+                const { releaseDate, from: dateFrom } = await resolveReleaseDate(
+                    file,
+                    existingEntry
+                );
+                dateSources[dateFrom]++;
+
                 const provenance = trackProvenance(existingEntry, title, albumName);
                 if (provenance.retitled) {
                     console.log(`  Retitled: "${existingEntry.title}" -> "${title}"`);
@@ -313,6 +456,7 @@ async function scanSongs() {
                     artist,
                     album: albumName,
                     duration,
+                    releaseDate,
                     contentHash,
                     // Owned by scan-songs.js like the master fields above, not by
                     // resolve-links.js: they are derived from the tags and from
@@ -357,11 +501,19 @@ async function scanSongs() {
                 // Published so the catalog browser can badge and sort without a
                 // second manifest. Undefined keys drop out of JSON.stringify, so
                 // an unchanged track costs one extra field, not four.
+                //
+                // releaseDate rides along for the same reason: the browser's
+                // release sort would otherwise need the registry, which is not
+                // something the client ever loads. It is not provenance and does
+                // NOT feed a badge -- trackProvenance looks only at title and
+                // album, so adding this field to every entry on the next scan
+                // announces nothing.
                 songList.push({
                     id: foundId,
                     title,
                     artist,
                     album: albumName,
+                    releaseDate,
                     links: registry[foundId].links,
                     ...provenance.fields,
                 });
@@ -380,6 +532,16 @@ async function scanSongs() {
 
         console.log(`\nSuccess! Generated manifest for ${songList.length} songs.`);
         console.log(`Output saved to: ${SONGLIST_OUTPUT_FILE}`);
+        console.log(
+            `Release dates: ${dateSources.source} from source tags, ` +
+                `${dateSources.carried} carried from the registry, ${dateSources.none} unknown.`
+        );
+        if (warnedNoSources && dateSources.carried) {
+            console.warn(
+                '  (carried because the source masters were unavailable -- run this scan\n' +
+                    '   locally to pick up any tag corrections)'
+            );
+        }
 
         reportRetired(registry, songList);
         await reportDuplicates(registry);

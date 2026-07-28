@@ -26,6 +26,14 @@ export interface ModeConfig {
     startDate: string;
     /** Prefix for shared results text, so two modes' scores are told apart. */
     shareLabel: string;
+    /**
+     * The artist every track in this mode is by. The catalog browser omits the
+     * artist line when it matches, because this is a game about ONE artist and
+     * repeating their name on all 89 rows is noise that crowds out the album and
+     * year. It renders only when a track credits somebody else too, which is the
+     * only case where the field carries information.
+     */
+    primaryArtist: string;
     /** One-line description, used for the tagline and page metadata. */
     blurb: string;
     /**
@@ -45,6 +53,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
         storagePrefix: '',
         startDate: '2026-07-24',
         shareLabel: 'removedle',
+        primaryArtist: 'Jane Remover',
         blurb: 'A daily Jane Remover song guessing game!',
     },
     challenger: {
@@ -55,6 +64,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
         storagePrefix: 'challenger-',
         startDate: '2026-07-24',
         shareLabel: 'removedle challenger',
+        primaryArtist: 'Jane Remover',
         blurb: "That challenger, who's already come this far, is going to face their final opponent!",
         blurbSong: 'Professional Vengeance',
     },

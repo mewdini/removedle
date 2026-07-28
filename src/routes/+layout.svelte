@@ -2,7 +2,7 @@
     import './layout.css';
     import favicon32 from '$lib/assets/favicon-32x32.png';
     import favicon128 from '$lib/assets/favicon-128x128.png';
-    import favicon180 from '$lib/assets/favicon-180x180.png';
+    import appleTouchIcon from '$lib/assets/apple-touch-icon-180x180.png';
     import favicon192 from '$lib/assets/favicon-192x192.png';
     import favicon512 from '$lib/assets/favicon-512x512.png';
 
@@ -126,9 +126,23 @@
 
     <link rel="icon" href={SITE + '/favicon.png'} />
     <link rel="icon" type="image/png" sizes="32x32" href={favicon32} />
-    <link rel="apple-touch-icon" sizes="180x180" href={favicon180} />
+    <!-- iOS does not read the web app manifest for home-screen icons, so this
+         tag is the only thing that feeds it and it needs its own file. The one
+         requirement it adds over a favicon is opacity: iOS composites an
+         apple-touch-icon onto black rather than onto the wallpaper, so the
+         artwork's own transparent rounded corners would show as black notches
+         under iOS's (wider) squircle mask. apple-touch-icon-180x180.png is
+         favicon-180x180.png flattened onto the artwork's #FAFAFA background.
+         It stays full-bleed -- unlike the maskable icons below, iOS crops
+         gently and does not need the 80% safe zone. -->
+    <link rel="apple-touch-icon" sizes="180x180" href={appleTouchIcon} />
     <link rel="icon" type="image/png" sizes="192x192" href={favicon192} />
     <link rel="icon" type="image/png" sizes="512x512" href={favicon512} />
+    <!-- Root-relative and hardcoded rather than resolve()d: resolve() returns
+         URLs relative to the current route ('.', '../challenger'), which would
+         make the manifest's own URL -- and therefore the resolution base for
+         start_url and scope -- depend on the page it was linked from. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
 </svelte:head>
 
 <div class="m-auto flex w-full max-w-[800px] flex-col items-center p-2 align-middle">

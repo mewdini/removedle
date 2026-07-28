@@ -47,10 +47,25 @@
 //                         via MusicLink, the artist's own SoundCloud profile,
 //                         Bandcamp, a title+channel-matched YouTube video). A
 //                         loose match is NEVER written to `links`; it goes to
-//                         entry.needsReview for a human to accept or reject, and
-//                         nothing is ever co-derived. Songs that have been swept
-//                         and genuinely missed everywhere get entry.linksOptional
-//                         so "no links" stops being reported as a problem.
+//                         entry.needsReview for a human to accept or reject.
+//                         Songs that have been swept and genuinely missed
+//                         everywhere get entry.linksOptional so "no links" stops
+//                         being reported as a problem.
+//                         The ONE co-derivation strict allows is youtubeMusic
+//                         from an ALREADY-ACCEPTED `youtube` link. It is the same
+//                         video id, so it cannot point at a different recording;
+//                         it only opens the vetted video in the YT Music player.
+//                         That is not discovery, so the invariant strict actually
+//                         protects -- never publish a link found by a loose
+//                         search -- is untouched. The id must be sitting in
+//                         entry.links.youtube: co-deriving from a bare
+//                         youtubeMusic that nothing vetted, co-deriving `youtube`
+//                         itself, and inventing an id from a search are all still
+//                         off, and it may only FILL an empty youtubeMusic -- never
+//                         replace a link already there, under either policy. The
+//                         result keeps its entry.coderived flag so a later local
+//                         --fix-youtube can heal it into a real Art Track if one
+//                         ever appears.
 //
 // This script owns ONLY the registry's link fields (links, deadLinks, tried,
 // isrc, coderived, needsReview, rejectedLinks, linksOptional); scan-songs.js owns
@@ -402,8 +417,12 @@ async function soundcloudClientId() {
 }
 
 // Catalog-first: sweep Jane Remover's official profile ONCE (resolve -> user id
-// -> paginated tracks) into a title -> URL map. Most tracks are official uploads
+// -> paginated tracks) into a title -> track map. Most tracks are official uploads
 // there, so this beats 89 fuzzy searches on both request count and accuracy.
+//
+// The map holds a record, not a bare URL, because the runtime is what lets a
+// primary-segment match be corroborated (see carriesPrimarySegment). api-v2 hands
+// it over for free with the track, so keeping it costs nothing.
 const SC_PROFILE = 'https://soundcloud.com/janeremover';
 let scCatalogCache = null;
 async function soundcloudCatalog() {
@@ -432,7 +451,12 @@ async function soundcloudCatalog() {
             const j = await r.json().catch(() => null);
             if (!j) break;
             for (const t of j.collection || []) {
-                if (t.title && t.permalink_url) map.set(norm(t.title), t.permalink_url);
+                if (!t.title || !t.permalink_url) continue;
+                map.set(norm(t.title), {
+                    url: t.permalink_url,
+                    title: t.title,
+                    seconds: t.duration ? Math.round(t.duration / 1000) : null,
+                });
             }
             next = j.next_href ? `${j.next_href}&client_id=${cid}` : null;
             await sleep(300);
@@ -466,8 +490,10 @@ const primarySegment = (t) => String(t || '').split(/\s*[([/]/)[0];
 // >= 6 chars, and every accepted result is confirmed by runtime afterwards.
 const MIN_ARCHIVE_KEY = 6;
 // A re-upload can differ by a second or two of silence; more than that and it is
-// a different take.
-const ARCHIVE_SECONDS_TOLERANCE = 4;
+// a different take. Shared by every runtime corroboration in this file (archive
+// candidates and the primary-segment match below), because the question is
+// always the same one: is this the same recording?
+const SECONDS_TOLERANCE = 4;
 // A truncated title has to share at least this much with ours before prefix
 // matching will consider it.
 const MIN_PREFIX_KEY = 14;
@@ -513,6 +539,40 @@ function titleCarries(candidate, title) {
     return keys.some((k) => k.includes(want));
 }
 
+// The OTHER direction: does `candidate` carry only the FIRST part of a multi-part
+// registry title? titleCarries is deliberately one-way -- it tolerates a
+// candidate that is longer than our title ("(feat. ...)", "[remix]") and never
+// one that is shorter, because a shorter title inside a longer one is usually a
+// different song. But an "A / B" tag is the case where the upload is legitimately
+// the shorter one: our master is tagged "do it again / cigarette" while the
+// artist's own upload is filed as "Do it again", so the correct link was
+// unreachable and a stranger's cover won the slot instead.
+//
+// This is the SoundCloud counterpart of the primary-segment retry youtubeVideo
+// already does, but it cannot work the same way. There, the segment shortens the
+// QUERY while acceptance still runs against the full title -- that is what keeps
+// the bare "Cage Girl" single from answering for "Cage Girl / Camgirl". Here the
+// upload's own title IS the short form, so acceptance itself has to give ground,
+// and the safety has to come from somewhere else entirely. Every caller therefore
+// corroborates a segment match before publishing it: the source must be the
+// artist's own profile, AND the runtime must match the master. Runtime is what
+// separates the "Cage Girl" single from the "Cage Girl / Camgirl" track, and on a
+// catalog this full of demos and alternate takes it is the most reliable signal
+// available. A bare segment match from an arbitrary search result is never
+// published.
+//
+// Permissive only. Under strict the segment path is not consulted at all, so
+// nothing about that policy's auto-publish surface changes.
+const MIN_SEGMENT_TITLE = 6;
+function carriesPrimarySegment(candidate, title) {
+    const want = norm(title);
+    const seg = norm(primarySegment(title));
+    // Nothing was actually trimmed -> titleCarries already covers this.
+    if (!seg || seg === want) return false;
+    if (seg.length < MIN_SEGMENT_TITLE) return false;
+    return titleKeys(candidate).some((k) => k === seg || k.includes(seg));
+}
+
 // Every name this artist has released under, current name first. Empty for modes
 // that declare none, which keeps permissive behaviour byte-identical.
 const artistNames = (artist) => [artist, ...(MODE.artistAliases || [])].filter(Boolean);
@@ -523,16 +583,90 @@ const artistNames = (artist) => [artist, ...(MODE.artistAliases || [])].filter(B
 // uploader who merely contains them -- "Kevin Le Roy" and "LeRoy - Untitled Long
 // Time" both matched the `leroy` alias that way. Tokenising keeps "le roy"
 // distinct from "leroy" while still ignoring punctuation and casing.
-const tokens = (s) =>
-    ` ${String(s || '')
+const tokenList = (s) =>
+    String(s || '')
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, ' ')
-        .trim()} `;
+        .trim()
+        .split(' ')
+        .filter(Boolean);
+
+// ANTI-CREDIT: the artist's name IS present, and its presence proves the track is
+// by somebody ELSE. "<X> cover" names the artist of the ORIGINAL song, not the
+// performer -- which is exactly how our own catalog uses it ("Round n Round
+// (Selena Gomez cover)" is Jane covering Selena, "Clairo Bags Cover" is Jane
+// covering Clairo). So "do it again / cigarette (jane remover cover)" is somebody
+// covering JANE, and reading that as a credit is what published a stranger's
+// cover as the answer to a real round (registry 463f8047758d, uploader "Bug
+// Eyed", 81.1s against our 82.7s master -- close enough that runtime did not save
+// us either).
+//
+// Only the word immediately after the name counts, and only these words:
+//   - "cover" (singular noun) yes: "<X> cover" is always "a cover OF X".
+//   - "covers" (verb) NO: "Jane Remover covers Alex G" is a track BY Jane. Same
+//     five letters, opposite meaning, so the inflection is load-bearing.
+//   - "remix" NO: the convention there is the reverse -- "(leroy remix)" credits
+//     the REMIXER, and this catalog has four of those as real titles. Treating it
+//     as an anti-credit would refuse the artist's own remixes. A remix OF the
+//     artist by someone else is caught by the marker rule below instead, which
+//     routes rather than rejects.
+// The name appearing a second time elsewhere still credits ("jane remover - x
+// (jane remover cover)"), which is deliberate -- that shape is ambiguous, and the
+// marker rule below is what catches it.
+const ANTI_CREDIT_AFTER = new Set(['cover']);
+
 const creditsArtist = (text, artist) => {
-    const t = tokens(text);
-    if (t.trim() === '') return false;
-    return artistNames(artist).some((a) => t.includes(tokens(a)));
+    const words = tokenList(text);
+    if (!words.length) return false;
+    return artistNames(artist).some((a) => {
+        const name = tokenList(a);
+        if (!name.length) return false;
+        for (let i = 0; i + name.length <= words.length; i++) {
+            if (name.some((w, k) => words[i + k] !== w)) continue;
+            if (ANTI_CREDIT_AFTER.has(words[i + name.length])) continue;
+            return true;
+        }
+        return false;
+    });
 };
+
+// VERSION MARKERS: words that say a candidate is a different PERFORMANCE of the
+// song rather than the song. The test is ASYMMETRIC -- a marker only counts
+// against a candidate when OUR OWN title does not carry it too. That is what
+// keeps a blanket "reject anything saying cover/remix" from gutting the catalogs:
+// 13 registry titles legitimately carry one of these words (10 in challenger,
+// whose catalog is leaks, demos, remixes and covers, plus three in normal), and
+// for those the word appears on both sides and cancels out.
+//
+// Chosen for being unambiguous about performance rather than about a release:
+// "edit" is skipped (a radio edit is the same recording, trimmed) and so is
+// "live" (it is an ordinary English word that turns up mid-title). Inflections
+// are deliberately not matched -- a "remixes" compilation is a different problem.
+//
+// A mismatch is NOT a rejection. Under the permissive policy the candidate is
+// routed to needsReview instead of links: "there is a marker here we cannot
+// account for" is a good reason to make a human look, and a poor reason to throw
+// away the only link a track has.
+const VERSION_MARKERS = new Set([
+    'cover',
+    'remix',
+    'mashup',
+    'bootleg',
+    'flip',
+    'vip',
+    'instrumental',
+    'acapella',
+    'nightcore',
+    'karaoke',
+    'sped',
+    'slowed',
+]);
+const markerWords = (t) => new Set(tokenList(t).filter((w) => VERSION_MARKERS.has(w)));
+// Markers the candidate claims that our own title does not account for.
+function unmatchedMarkers(candidateTitle, ourTitle) {
+    const ours = markerWords(ourTitle);
+    return [...markerWords(candidateTitle)].filter((w) => !ours.has(w));
+}
 
 // Catalog sweep over the mode's curated archive accounts (see modes.js). Most of
 // the strict catalog was never released, so the artist's own profile does not
@@ -658,6 +792,83 @@ async function soundcloudArchiveCatalog() {
     return (scArchiveCache = { ok: reached > 0, map, all });
 }
 
+// Sort every search result into "safe to publish" and "a human should look".
+// Pure and network-free, deliberately: this is the decision that put a stranger's
+// cover on a results screen, so it has to be exercisable against fixed candidate
+// lists rather than only against whatever SoundCloud returns today.
+//
+// A candidate has to clear three gates, in order:
+//   1. CREDIT. The uploader or the title has to name the artist -- and not as an
+//      anti-credit (see creditsArtist). This is the primary defence: "(jane
+//      remover cover)" stops being a credit at all, so the cover is not merely
+//      demoted, it is dropped before anything else is considered.
+//   2. TITLE. A full match (titleCarries), or -- permissive only -- a
+//      primary-segment match, which then has to be corroborated below.
+//   3. CONFIDENCE. An unaccounted version marker, or an uncorroborated segment
+//      match, is real enough to keep but not to publish, so it goes to
+//      needsReview. Under permissive that is a new use of a queue the strict
+//      policy already relies on; the alternative -- discarding it -- would lose
+//      the only lead a linkless track has.
+function scoreSoundcloudCandidates(tracks, title, artist, seconds = null) {
+    const publish = [];
+    const review = [];
+    for (const t of tracks || []) {
+        const url = t?.permalink_url;
+        if (!url) continue;
+        const uploader = t.user?.username || '';
+        const credited =
+            creditsArtist(uploader, artist) ||
+            norm(uploader).includes('janeremover') ||
+            creditsArtist(t.title, artist);
+        if (!credited) continue;
+
+        const full = titleCarries(t.title, title);
+        const segment = !full && !STRICT && carriesPrimarySegment(t.title, title);
+        if (!full && !segment) continue;
+
+        const secs = t.duration ? Math.round(t.duration / 1000) : null;
+        const delta = seconds && secs ? Math.abs(secs - seconds) : null;
+        const rec = {
+            url,
+            title: t.title || '',
+            uploader,
+            seconds: secs,
+            delta,
+            // The artist's own profile, tested on the permalink rather than on
+            // the display name -- a fan account can call itself anything.
+            official: String(url).startsWith(`${SC_PROFILE}/`),
+            runtimeOk: delta !== null && delta <= SECONDS_TOLERANCE,
+            markers: unmatchedMarkers(t.title, title),
+            segment: !!segment,
+        };
+
+        if (rec.markers.length) {
+            review.push({ ...rec, why: `unaccounted "${rec.markers.join('", "')}"` });
+        } else if (rec.segment && !(rec.official && rec.runtimeOk)) {
+            review.push({ ...rec, why: 'primary-segment match, uncorroborated' });
+        } else {
+            publish.push(rec);
+        }
+    }
+    // Prefer the artist's own upload, then one whose runtime matches the master;
+    // Array.prototype.sort is stable, so anything else keeps SoundCloud's own
+    // relevance order. Before this the first result simply won, which is how a
+    // fan re-upload could outrank the official one.
+    publish.sort(
+        (a, b) =>
+            Number(b.official) - Number(a.official) || Number(b.runtimeOk) - Number(a.runtimeOk)
+    );
+    return { publish, review };
+}
+
+const toReviewCandidate = (c) => ({
+    platform: 'soundcloud',
+    url: c.url,
+    title: c.title,
+    uploader: c.uploader,
+    source: c.why ? `soundcloud-search (${c.why})` : 'soundcloud-search',
+});
+
 // Per-track search for the tail the profile can't cover -- deleted loosies and
 // covers that only survive as re-uploads on other accounts. Strong title match;
 // accept a non-official uploader since the originals are gone.
@@ -665,7 +876,7 @@ async function soundcloudArchiveCatalog() {
 // Under the strict policy this NEVER auto-accepts: a search hit from an arbitrary
 // uploader is exactly the kind of confident-looking wrong link that ruins a
 // guessing game. Matches are returned as review candidates instead.
-async function soundcloudSearch(title, artist) {
+async function soundcloudSearch(title, artist, seconds = null) {
     try {
         const cid = await soundcloudClientId();
         if (!cid) return { ok: false, links: {} };
@@ -693,29 +904,35 @@ async function soundcloudSearch(title, artist) {
         }
         if (!anyOk) return { ok: false, links: {} };
 
-        const matches = [...collected.values()].filter(
-            (t) =>
-                titleCarries(t.title, title) &&
-                (creditsArtist(t.user?.username, artist) ||
-                    norm(t.user?.username).includes('janeremover') ||
-                    creditsArtist(t.title, artist))
+        const { publish, review } = scoreSoundcloudCandidates(
+            [...collected.values()],
+            title,
+            artist,
+            seconds
         );
 
         if (STRICT) {
+            // Nothing a search turned up is publishable here, so everything that
+            // survived scoring is a review candidate.
             return {
                 ok: true,
                 links: {},
-                review: matches.slice(0, MAX_REVIEW_PER_PLATFORM).map((t) => ({
-                    platform: 'soundcloud',
-                    url: t.permalink_url,
-                    title: t.title,
-                    uploader: t.user?.username || '',
-                    source: 'soundcloud-search',
-                })),
+                review: [...publish, ...review]
+                    .slice(0, MAX_REVIEW_PER_PLATFORM)
+                    .map(toReviewCandidate),
             };
         }
 
-        return { ok: true, links: matches[0] ? { soundcloud: matches[0].permalink_url } : {} };
+        return {
+            ok: true,
+            links: publish[0] ? { soundcloud: publish[0].url } : {},
+            // Queued only when nothing was publishable (trySource ignores review
+            // once a link lands), so this is what a track ends up with instead of
+            // silently resolving to nothing.
+            review: [...publish.slice(1), ...review]
+                .slice(0, MAX_REVIEW_PER_PLATFORM)
+                .map(toReviewCandidate),
+        };
     } catch {
         return { ok: false, links: {} };
     }
@@ -726,10 +943,47 @@ async function soundcloudSearch(title, artist) {
 // policies. { ok:false } only if BOTH the catalog failed to load and the search
 // request failed, so a genuine "not on SoundCloud" still records a dated miss.
 async function soundcloudLookup(title, artist, seconds = null) {
+    // Candidates that are worth a human's attention but not worth publishing.
+    // Merged with the search's own queue on the way out.
+    const review = [];
     const cat = await soundcloudCatalog();
     if (cat.ok) {
-        const url = cat.map.get(norm(title));
-        if (url) return { ok: true, links: { soundcloud: url } };
+        const hit = cat.map.get(norm(title));
+        if (hit) return { ok: true, links: { soundcloud: hit.url } };
+
+        // Our tag is "A / B" but the artist filed the upload as just "A". The
+        // source is already the strongest one there is -- the artist's own
+        // profile -- so the only thing left to establish is that it is the same
+        // recording, which the runtime settles. Both halves are required: an
+        // official upload titled with only our first segment could still be a
+        // different release (the bare "Cage Girl" single vs "Cage Girl /
+        // Camgirl"), and that is exactly what the runtime tells apart.
+        const seg = norm(primarySegment(title));
+        const segHit =
+            seg && seg !== norm(title) && seg.length >= MIN_SEGMENT_TITLE ? cat.map.get(seg) : null;
+        if (segHit) {
+            const delta = seconds && segHit.seconds ? Math.abs(segHit.seconds - seconds) : null;
+            const runtimeOk = delta !== null && delta <= SECONDS_TOLERANCE;
+            if (runtimeOk && !STRICT) {
+                console.log(
+                    `      soundcloud official segment hit "${segHit.title}" (${segHit.seconds}s vs ${seconds}s)`
+                );
+                return { ok: true, links: { soundcloud: segHit.url } };
+            }
+            // Strict does not publish from the segment path at all, and neither
+            // policy publishes one the runtime cannot back up (or where a runtime
+            // is simply unknown). Queue it: it is the artist's own upload, so it
+            // is almost certainly right, and a human can say so in one look.
+            review.push({
+                platform: 'soundcloud',
+                url: segHit.url,
+                title: segHit.title,
+                uploader: 'official profile',
+                source: `soundcloud-official (primary-segment match${
+                    runtimeOk ? '' : `, ${segHit.seconds ?? '?'}s vs ${seconds ?? '?'}s`
+                })`,
+            });
+        }
     }
 
     // Then the curated archive accounts (strict modes only). Exact title match
@@ -786,7 +1040,7 @@ async function soundcloudLookup(title, artist, seconds = null) {
                 continue;
             }
             const delta = seconds && c.seconds ? Math.abs(c.seconds - seconds) : null;
-            if (delta !== null && delta > ARCHIVE_SECONDS_TOLERANCE) {
+            if (delta !== null && delta > SECONDS_TOLERANCE) {
                 console.log(
                     `      archive skip [${c.account}] "${c.title}" (${c.seconds}s vs ${seconds}s)`
                 );
@@ -798,20 +1052,45 @@ async function soundcloudLookup(title, artist, seconds = null) {
         if (viable.length) {
             // Closest runtime wins; an unknown runtime sorts last.
             viable.sort((a, b) => (a.delta ?? 1e9) - (b.delta ?? 1e9));
-            const best = viable[0];
-            console.log(
-                `      archive hit [${best.account}] "${best.title}"` +
-                    (best.delta !== null ? ` (${best.seconds}s vs ${seconds}s)` : '')
-            );
-            return { ok: true, links: { soundcloud: best.url } };
+            // A vetted account and an agreeing runtime still do not tell a cover
+            // from the real thing -- the cover that started all this was 1.6s off
+            // our master, well inside tolerance. So a version marker our own title
+            // does not carry demotes the candidate to review and lets the next one
+            // through, rather than publishing it.
+            const best = viable.find((c) => !unmatchedMarkers(c.title, title).length);
+            for (const c of viable) {
+                const markers = unmatchedMarkers(c.title, title);
+                if (!markers.length || c === best) continue;
+                console.log(
+                    `      archive defer [${c.account}] "${c.title}" (unaccounted "${markers.join('", "')}")`
+                );
+                review.push({
+                    platform: 'soundcloud',
+                    url: c.url,
+                    title: c.title,
+                    uploader: c.account,
+                    source: `soundcloud-archive (unaccounted "${markers.join('", "')}")`,
+                });
+            }
+            if (best) {
+                console.log(
+                    `      archive hit [${best.account}] "${best.title}"` +
+                        (best.delta !== null ? ` (${best.seconds}s vs ${seconds}s)` : '')
+                );
+                return { ok: true, links: { soundcloud: best.url } };
+            }
         }
     }
 
-    const search = await soundcloudSearch(title, artist);
+    const search = await soundcloudSearch(title, artist, seconds);
     if (search.links?.soundcloud) return search;
     // A catalog loaded (an authoritative "not there") OR search succeeded with no
     // hit -> a real miss. Only report failure if nothing could be reached.
-    return { ok: cat.ok || arch.ok || search.ok, links: {}, review: search.review };
+    return {
+        ok: cat.ok || arch.ok || search.ok,
+        links: {},
+        review: [...review, ...(search.review || [])].slice(0, MAX_REVIEW_PER_PLATFORM),
+    };
 }
 
 // --- YouTube + YouTube Music (resolved SEPARATELY) --------------------------
@@ -826,6 +1105,28 @@ const vidId = (u) => {
 const ytUrl = (id) => `https://www.youtube.com/watch?v=${id}`;
 const ytmUrl = (id) => `https://music.youtube.com/watch?v=${id}`;
 const isTopic = (ch) => !!ch && / - Topic$/.test(ch);
+
+// Is this oEmbed record the Art Track for OUR song? Deliberately one function
+// used in two places: ytmArtTrack applies it to a candidate it is about to
+// accept, and fixYouTube applies it to a link that is ALREADY in youtubeMusic.
+// Those two tests must never drift apart -- a link we would not accept today is
+// not one we should keep trusting just because it got there first.
+//
+// A "- Topic" channel alone is not enough, and that is the whole point: an Art
+// Track can be perfectly well formed and still be the wrong song. `what's my age
+// again ?` (97s) held a genuine Art Track whose title was "Video" -- a real Topic
+// upload of something else entirely, 523s long. The channel test passes there;
+// only the title test catches it.
+function isArtTrackFor(info, title, artist) {
+    if (!info || !isTopic(info.channel)) return false;
+    if (!norm(info.channel).includes(norm(artist))) return false;
+    // Substring match, but only when the shorter title is >=5 chars, so a tiny
+    // title like "me" doesn't match "ho-me-switcher". Short titles require an
+    // exact normalized match.
+    const t = norm(title);
+    const it = norm(info.title);
+    return it === t || (it.includes(t) && t.length >= 5) || (t.includes(it) && it.length >= 5);
+}
 
 // oEmbed: a video's channel + title (and, as a side effect, that it is live).
 // Free, no key. Returns null on any failure (treat as unknown).
@@ -1025,18 +1326,7 @@ async function ytmArtTrack(title, artist) {
         })(j);
         for (const id of ids.slice(0, 10)) {
             const info = await oembedInfo(id);
-            if (info && isTopic(info.channel) && norm(info.channel).includes(norm(artist))) {
-                // Substring match, but only when the shorter title is >=5 chars,
-                // so a tiny title like "me" doesn't match "ho-me-switcher". Short
-                // titles require an exact normalized match.
-                const t = norm(title);
-                const it = norm(info.title);
-                const titleMatch =
-                    it === t ||
-                    (it.includes(t) && t.length >= 5) ||
-                    (t.includes(it) && it.length >= 5);
-                if (titleMatch) return { ok: true, id };
-            }
+            if (isArtTrackFor(info, title, artist)) return { ok: true, id };
             await sleep(100);
         }
         // No title match -> no Art Track for this track. Do NOT fall back to the
@@ -1049,13 +1339,18 @@ async function ytmArtTrack(title, artist) {
 }
 
 // Reconcile one song's youtube / youtubeMusic so `youtube` is the real video and
-// `youtubeMusic` is the Art Track. Classifies the current shared id via oEmbed,
-// then resolves the missing side from its own source (Data API / YT Music). When
-// the proper distinct link can't be found it CO-DERIVES (same id, other prefix)
-// -- always valid, even from a cron -- and sets entry.coderived[platform] so a
-// later run retries. Returns change tags for logging.
+// `youtubeMusic` is the Art Track. Classifies the ids that are already there via
+// oEmbed, then resolves the missing side from its own source (Data API / YT
+// Music). When the proper distinct link can't be found it CO-DERIVES (same id,
+// other prefix) into an EMPTY slot -- always valid, even from a cron -- and sets
+// entry.coderived[platform] so a later run retries. Returns change tags for
+// logging, plus warnings for the things a human should look at.
 async function fixYouTube(entry) {
     const changes = [];
+    // Things that are not changes but are worth a line of output: a link kept
+    // rather than replaced, and why. Printed by the --fix-youtube loop, which
+    // owns the formatting and already has the song title to hand.
+    const warnings = [];
     // Whether the underlying lookups actually got answers. A quota-blocked or
     // otherwise failed request must not be reported to the caller as "checked
     // and found nothing", or the caller stamps a dated miss and stops asking.
@@ -1089,6 +1384,13 @@ async function fixYouTube(entry) {
     };
 
     const cur = vidId(entry.links.youtube) || vidId(entry.links.youtubeMusic);
+    // The one video id it is safe to co-derive `youtubeMusic` from under the
+    // strict policy: one that is ALREADY published as `youtube`, i.e. a human
+    // accepted it or a title+channel-matched Data API hit did. Snapshotted BEFORE
+    // the branch below runs, deliberately -- that branch can promote a bare
+    // youtubeMusic link into the `youtube` slot (curTopic === false), and reading
+    // entry.links.youtube afterwards would launder that unvetted id into "accepted".
+    let vettedYt = vidId(entry.links.youtube);
     let curTopic = null; // true=Art Track, false=real video, null=unknown/dead
     if (cur) {
         const info = await oembedInfo(cur);
@@ -1106,6 +1408,10 @@ async function fixYouTube(entry) {
             set('youtube', ytUrl(v.id), `youtube=${v.id}`);
             unflag('youtube');
             clearReview(entry, ['youtube']);
+            // Accepted by youtubeVideo, which under strict demands an exact title
+            // AND the artist's own channel -- so it is vetted enough to co-derive
+            // the YT Music URL from below.
+            vettedYt = v.id;
         } else if (v.review?.length) {
             recordReview(entry, v.review);
         } else if (cur && !STRICT) {
@@ -1114,9 +1420,47 @@ async function fixYouTube(entry) {
         }
     }
 
+    // What is sitting in youtubeMusic right now, if anything.
+    //
+    // `cur` prefers the youtube id, so an existing youtubeMusic that points at a
+    // DIFFERENT video is invisible to the classification above -- curTopic
+    // describes the youtube video, not this one. That blind spot is what let a
+    // co-derived duplicate overwrite a real Art Track on `what's my age again ?`.
+    // Classify it on its own so the pass can actually see it.
+    //
+    // Cost: one extra oEmbed, only for entries that have a distinct pair (on
+    // normal that is all 89). oEmbed is free, keyless and unmetered, and the pass
+    // already spends one per entry plus up to ten inside ytmArtTrack -- so where
+    // the held link IS the Art Track this is a net SAVING, replacing a YT Music
+    // search and its candidate oEmbeds with a single call.
+    const heldYtm = entry.links.youtubeMusic;
+    const heldOccupied = typeof heldYtm === 'string' && heldYtm.trim() !== '';
+    const heldId = vidId(heldYtm);
+    let heldIsArtTrack = false;
+    if (heldOccupied && heldId && heldId !== cur) {
+        const info = await oembedInfo(heldId);
+        heldIsArtTrack = isArtTrackFor(info, entry.title, entry.artist);
+        if (!heldIsArtTrack && info) {
+            // Well-formed but unconfirmed: either not a Topic channel at all, or
+            // a Topic upload whose title is not our song. Both are worth saying
+            // out loud, because the search below usually cannot replace it and
+            // the guard further down will then keep it.
+            warnings.push(
+                `youtubeMusic ${heldId} is not a confirmed Art Track for this song ` +
+                    `("${info.title}" on "${info.channel}")`
+            );
+        }
+    }
+
     // youtubeMusic = the Art Track ("<artist> - Topic" Song)
     if (curTopic === true) {
         set('youtubeMusic', ytmUrl(cur), 'ytmusic=arttrack');
+        unflag('youtubeMusic');
+    } else if (heldIsArtTrack) {
+        // Already the right thing. Leave the URL exactly as it is (normalising it
+        // would strip a deliberate query string) and just clear any stale
+        // co-derived flag, which is the one piece of bookkeeping this case used to
+        // miss entirely because the link was never looked at.
         unflag('youtubeMusic');
     } else {
         const a = await ytmArtTrack(entry.title, entry.artist);
@@ -1124,20 +1468,42 @@ async function fixYouTube(entry) {
         if (a.id) {
             set('youtubeMusic', ytmUrl(a.id), `ytmusic=${a.id}`);
             unflag('youtubeMusic');
-        } else if (!STRICT) {
-            const yid = vidId(entry.links.youtube) || cur;
-            if (yid) {
+        } else {
+            // No distinct Art Track exists (or could be reached), so fall back to
+            // the same video id under the YT Music player. This is a re-pointing,
+            // not a discovery: the id is one we already publish, so it cannot
+            // resolve to a different recording -- which is why strict allows it
+            // even though strict forbids everything a search turned up. Strict
+            // takes the id ONLY from `vettedYt`; permissive keeps its historical
+            // `|| cur` fallback, which may come from a bare youtubeMusic link.
+            const yid = STRICT ? vettedYt : vidId(entry.links.youtube) || cur;
+            // FILL ONLY. Co-derivation may occupy an EMPTY slot; it may never
+            // replace a link that is already there. Whatever is there was either
+            // curated by hand or resolved by a real Art Track lookup, and a
+            // co-derived duplicate of the youtube link is strictly less
+            // informative than either -- it adds no destination the results screen
+            // does not already offer. This is the same rule trySource enforces for
+            // every other source, and it applies under BOTH policies: normal has
+            // 89 distinct youtube/youtubeMusic pairs and this path would have
+            // flattened them just as readily.
+            //
+            // The one thing it cannot do is tell a wrong-but-well-formed link from
+            // a right one, so it is paired with the warning above rather than
+            // being silent: keeping a bad link unreported is its own failure.
+            if (yid && heldOccupied && heldId !== yid) {
+                warnings.push(
+                    `kept existing youtubeMusic (${heldYtm}) -- no Art Track found, ` +
+                        `and a co-derived duplicate of youtube would be no better`
+                );
+            } else if (yid) {
                 set('youtubeMusic', ytmUrl(yid), 'ytmusic~coderived');
                 flag('youtubeMusic');
             }
         }
-        // Strict: no co-derivation. Presenting a fan re-upload as the official
-        // "- Topic" Art Track is precisely the wrong-link this policy exists to
-        // prevent, so the platform is simply left unset.
     }
 
     if (entry.coderived && Object.keys(entry.coderived).length === 0) delete entry.coderived;
-    return { changes, ok };
+    return { changes, ok, warnings };
 }
 
 // --- link liveness (for --verify) ------------------------------------------
@@ -1206,13 +1572,24 @@ async function main() {
     // fill-missing resolution below. Local only (uses YT Music scraping).
     if (FIX_YT) {
         let n = 0;
+        let kept = 0;
         for (const [id, entry] of Object.entries(registry)) {
             if (only && !only.has(id)) continue;
             entry.links = entry.links || {};
-            const { changes } = await fixYouTube(entry);
+            const { changes, warnings } = await fixYouTube(entry);
             if (changes.length) {
                 n++;
                 console.log(`  ~ ${entry.title}: ${changes.join(', ')}`);
+            }
+            // Deliberately console output rather than entry.needsReview. That
+            // queue holds candidate URLs for a human to accept, and accepting
+            // moves the url INTO links -- so queueing the co-derived duplicate we
+            // just declined to write would offer a one-keystroke path to the very
+            // overwrite this guard exists to prevent. recordReview would refuse it
+            // anyway: it skips any platform that already holds a link.
+            for (const w of warnings || []) {
+                kept++;
+                console.log(`  ! ${entry.title}: ${w}`);
             }
             await sleep(200);
         }
@@ -1220,7 +1597,8 @@ async function main() {
         await fs.writeFile(REGISTRY_FILE, JSON.stringify(registry, null, 2));
         await syncCatalogLinks(registry);
         console.log(
-            `\nfix-youtube: changed ${n} track(s) | ${flagged} co-derived (flagged for self-heal)`
+            `\nfix-youtube: changed ${n} track(s) | ${flagged} co-derived (flagged for self-heal)` +
+                (kept ? ` | ${kept} existing link(s) kept, listed above` : '')
         );
         return;
     }
@@ -1271,12 +1649,18 @@ async function main() {
                 for (const [platform, url] of dead) {
                     let candidate = mlLinks[platform] || null;
                     let coderive = false;
-                    // Strict: heal from MusicLink (ISRC) only. A search-based or
-                    // co-derived replacement is a guess, and silently swapping in
-                    // a guess is worse than showing nothing -- so anything that
-                    // cannot be healed authoritatively is hidden below.
-                    if (STRICT) {
-                        // no search-based or co-derived healing
+                    // Strict: heal from MusicLink (ISRC) only. A SEARCH-based
+                    // replacement is a guess, and silently swapping in a guess is
+                    // worse than showing nothing -- so anything that cannot be
+                    // healed authoritatively is hidden below. youtubeMusic is the
+                    // exception both policies share: it co-derives from the
+                    // (already-healed, still-live) `youtube` link, which is an id
+                    // we already publish rather than anything newly discovered,
+                    // so it cannot point at a different recording. If `youtube`
+                    // was itself dead and got hidden above, entry.links.youtube is
+                    // gone, no id is available, and youtubeMusic is hidden too.
+                    if (STRICT && platform !== 'youtubeMusic') {
+                        // no search-based healing
                     } else if (platform === 'youtube' && YT_KEY) {
                         // real video via the Data API -- official, so cron-safe
                         const v = await youtubeVideo(entry.title, entry.artist);

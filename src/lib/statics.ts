@@ -54,11 +54,46 @@ const ALT_NAME = 'janedle removedle';
 // One-hop query marker. Stripped as soon as it becomes the cookie, so it never
 // lingers in a shareable URL.
 const ALT_MARKER = 'janedle';
-// Set as a SESSION cookie (see the handle hook), so the egg lasts the visit that
-// came in through the alias and no longer. It must not outlive the browser: the
-// egg is for using the janedle URL, not a permanent rebrand of every later visit
-// made directly to removedle.org.
-const ALT_COOKIE = 'via-janedle';
+// Set by the handle hook with an explicit Max-Age (below), so the egg lasts the
+// visit that came in through the alias and no longer. The egg is for using the
+// janedle URL, not a permanent rebrand of every later visit made directly to
+// removedle.org.
+//
+// The `-v2` suffix is load-bearing and must not be tidied away. Max-Age only
+// applies to cookies written AFTER it ships: a browser that already holds the
+// old session-scoped `via-janedle` never gains an expiry retroactively, so every
+// player who has been through the alias would have stayed branded indefinitely
+// and the fix would have looked like it had not worked. Reading a new name
+// abandons all of those in one deploy. The old cookie is deliberately not
+// expired -- clearing it would mean writing a Set-Cookie on requests that need
+// no response header at all, to reclaim ~14 bytes that the browser drops on its
+// next real restart anyway. Renaming again is the fix if this ever recurs.
+const ALT_COOKIE = 'via-janedle-v2';
+// Six hours, in seconds -- how long the easter egg survives.
+//
+// This was originally a SESSION cookie (no Max-Age, no Expires), on the theory
+// that "the browser closes" is the natural end of a visit. It is not, and that
+// is why this constant exists: mobile Safari and Chrome are effectively never
+// closed, and desktop Chrome's "Continue where you left off" restores session
+// cookies across a restart. So one trip through janedle.org branded the browser
+// indefinitely, and a later click from an unrelated site -- the reported case
+// was a t.co link pointing straight at removedle.org, carrying no marker at all
+// -- still rendered the egg. A session cookie states the intent without
+// enforcing it; only an explicit Max-Age enforces it.
+//
+// Six hours bounds the egg to one sitting. A round is 5 songs and a few
+// minutes, but a player may wander off and come back the same evening, and this
+// covers that comfortably. It is also a quarter of a day, so it can never reach
+// the next day's puzzle (the game rolls over every 24h at 21:00 PT) and a visit
+// arriving from somewhere else tomorrow is always unbranded -- which is the
+// property that was actually broken.
+//
+// The window does NOT slide. The cookie is only ever written on the single hop
+// that carries ALT_MARKER, so the clock starts when the player came through the
+// alias and continued play never extends it. That is deliberate: re-stamping it
+// on every request would keep a daily player branded forever, which is the bug
+// again by another route.
+const ALT_COOKIE_MAX_AGE = 6 * 60 * 60;
 
 // Takes the already-resolved flag rather than a hostname: the egg outlives the
 // redirect, so by render time the hostname is always the canonical one.
@@ -77,6 +112,7 @@ export {
     ALT_NAME,
     ALT_MARKER,
     ALT_COOKIE,
+    ALT_COOKIE_MAX_AGE,
     siteName,
     DESCRIPTION,
     SITE,
