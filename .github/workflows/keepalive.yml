@@ -8,8 +8,8 @@ on:
         # (including this one), so the set is self-sustaining. Twice a month (1st
         # and 15th) is ~4 shots per 60-day window -- ample margin against dropped
         # runs, and GitHub also emails a warning ~10 days before it would disable.
-        # 07:27 UTC: a distinct hour from the daily (05:09) and verify (Mon 06:09)
-        # crons, off the top of the hour to dodge high-load drops. `[skip ci]` asks
+        # 07:27 UTC: a distinct hour from the daily cron (06:09), off the top of
+        # the hour to dodge high-load drops. `[skip ci]` asks
         # Workers Builds not to deploy the no-op commit; if not honored the worst
         # case is a harmless empty build, never a missed reset (so it commits to
         # the default branch, where the reset is guaranteed).

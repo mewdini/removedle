@@ -21,7 +21,7 @@
         RECENT_WINDOW_DAYS,
         type CatalogFlag,
     } from '$lib/catalog';
-    import { getTodayDate } from '$params/date';
+    import { getGameDate } from '$params/date';
     import Modal from './Modal.svelte';
     import AlbumArtComponent from './game/AlbumArt.svelte';
     import StreamingLinks from './game/StreamingLinks.svelte';
@@ -32,7 +32,10 @@
 
     // The mode being PLAYED, which is not necessarily the one being browsed.
     const pageMode = $derived(resolveMode(page.data.mode));
-    const today = getTodayDate();
+    // The live game day, which the NEW/UPDATED badge window is measured against.
+    // Same reckoning the pipeline stamps addedAt/updatedAt with, so a song
+    // published in the evening is not immediately described as "yesterday".
+    const today = getGameDate();
 
     let browsingId = $state<ModeId>(MODES.normal.id);
     let query = $state('');

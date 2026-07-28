@@ -2,20 +2,27 @@ name: Daily Challenges
 
 on:
     schedule:
-        # 05:09 UTC daily. Deliberately off the top of the hour: GitHub can delay
+        # 06:09 UTC daily. Deliberately off the top of the hour: GitHub can delay
         # or drop scheduled runs during the high-load spike at :00.
         #
         # This is only WHEN generation runs. Challenges unlock for players at
-        # 00:00 Pacific (the site rolls over at PT midnight -- see getTodayDate;
-        # that is 07:00-08:00 UTC depending on DST). The run on day D produces the
-        # D+1 date string, so the challenge lands in R2 ~26 hours before it is
-        # needed -- ample slack even if a run is delayed.
+        # 21:00 Pacific (the site rolls over at 9pm PT -- see getGameDate; that is
+        # 04:00-05:00 UTC depending on DST).
+        #
+        # The hour matters now that the target date comes from the game clock
+        # (scripts/next-game-date.js = gameDate() + 1). That is only correct if the
+        # run lands AFTER the reset for the day it is generating, otherwise +1
+        # would name a day that is already live. 06:09 UTC is 23:09 PT in PDT and
+        # 22:09 PT in PST, i.e. 129 and 69 minutes past the reset -- and since
+        # Actions only ever delays a run, never fires one early, a delay pushes it
+        # further into the safe window rather than out of it. The challenge still
+        # lands in R2 ~22 hours before players reach it.
         #
         # The same run also does a full streaming-link liveness sweep, folded in
         # from the old standalone verify-links cron: one schedule we know fires
         # beats two independently-scheduled ones, given how much GitHub delays and
         # drops scheduled runs.
-        - cron: '9 5 * * *'
+        - cron: '9 6 * * *'
     workflow_dispatch:
         inputs:
             target_date:
@@ -120,7 +127,11 @@ jobs:
                       done
                   else
                       if [ -z "$TARGET_DATE" ]; then
-                          TARGET_DATE=$(date -d "tomorrow" +%Y-%m-%d)
+                          # From the game clock, not the runner's UTC date: the
+                          # runner is UTC and the game rolls over at 21:00 PT, so
+                          # `date -d tomorrow` only agreed with this by virtue of
+                          # where the cron happened to sit.
+                          TARGET_DATE=$(node scripts/next-game-date.js)
                       fi
                       echo "Generating for date: $TARGET_DATE"
                       generate_all "$TARGET_DATE"

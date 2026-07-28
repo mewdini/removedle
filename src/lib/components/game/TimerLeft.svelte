@@ -1,13 +1,17 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
-    import { SvelteDate } from 'svelte/reactivity';
+    import { secondsUntilReset } from '$params/date';
 
-    let timeLeft: string | null = $state(getTimeUntilMidnight());
-    let timer: NodeJS.Timeout | null = null;
+    // Purely a display. It must NOT navigate or invalidate when it reaches zero:
+    // it renders inside Results, which the Board's toggle can open mid-game, so a
+    // refresh fired from here would yank a board out from under a player. The
+    // rollover is handled in Game.svelte, which can see the game state.
+    let timeLeft = $state(format(secondsUntilReset()));
+    let timer: ReturnType<typeof setInterval> | null = null;
 
     onMount(() => {
         timer = setInterval(() => {
-            timeLeft = getTimeUntilMidnight();
+            timeLeft = format(secondsUntilReset());
         }, 1000);
     });
 
@@ -17,25 +21,17 @@
         }
     });
 
-    function getTimeUntilMidnight() {
-        const now = new SvelteDate();
-        const tomorrowUtc = new SvelteDate(now.getTime());
-        tomorrowUtc.setUTCDate(now.getUTCDate() + 1);
-        tomorrowUtc.setUTCHours(0, 0, 0, 0);
+    // Seconds until the next 21:00 Pacific, as HH:MM:SS. The Pacific arithmetic
+    // lives in secondsUntilReset so this agrees with getGameDate by construction
+    // rather than being a second, separately-maintained copy of it -- which is
+    // how this component came to count down to UTC midnight while the game rolled
+    // over on Pacific time.
+    function format(total: number) {
+        const hours = Math.floor(total / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
+        const seconds = total % 60;
 
-        const timeLeft = tomorrowUtc.getTime() - now.getTime();
-
-        const hours = Math.floor((timeLeft / 1000 / 60 / 60) % 24)
-            .toString()
-            .padStart(2, '0');
-        const minutes = Math.floor((timeLeft / 1000 / 60) % 60)
-            .toString()
-            .padStart(2, '0');
-        const seconds = Math.floor((timeLeft / 1000) % 60)
-            .toString()
-            .padStart(2, '0');
-
-        return `${hours}:${minutes}:${seconds}`;
+        return [hours, minutes, seconds].map((n) => n.toString().padStart(2, '0')).join(':');
     }
 </script>
 

@@ -7,7 +7,7 @@ import { encode } from '@msgpack/msgpack';
 import { runFfmpeg } from './lib/ffmpeg.js';
 import { modeDirs, NON_ALBUM_LABELS, parseMode } from './lib/modes.js';
 import { findDuplicates } from './lib/similarity.js';
-import { todayPacific } from './lib/dates.js';
+import { gameDate } from './lib/dates.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +27,11 @@ const COVERS_MIN_OUTPUT_FILE = path.join(DATA_DIR, 'covers.min.json');
 
 const SUPPORTED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg'];
 
-const TODAY = todayPacific();
+// The live game day, not the calendar day. The catalog browser measures its
+// "new for 14 days" window by comparing these stamps against the same reckoning
+// on the client, so a scan published after 21:00 PT has to agree with the day the
+// player is being shown or the badge reads as a day old the moment it appears.
+const TODAY = gameDate();
 
 // Provenance for the in-game catalog browser, which badges recent arrivals and
 // retitles so it doubles as a changelist.

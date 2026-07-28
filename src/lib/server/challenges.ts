@@ -5,7 +5,7 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { challengeStats } from './db/schema';
 import { and, eq, sql } from 'drizzle-orm';
 import * as schema from '$lib/server/db/schema';
-import { getTodayDate } from '$params/date';
+import { getGameDate } from '$params/date';
 
 type AlbumEntry = {
     name: string;
@@ -13,11 +13,13 @@ type AlbumEntry = {
 };
 
 export function isFutureChallengeDate(value: string): boolean {
-    // Future = after the current Pacific calendar day (the game rolls over at PT
-    // midnight). Zero-padded ISO date strings compare lexically in chronological
-    // order, and `value` is validated as YYYY-MM-DD by the date param matcher.
-    // Mode-independent: every mode unlocks the same day at the same instant.
-    return value > getTodayDate();
+    // Future = after the currently live game day (the game rolls over at 21:00
+    // Pacific, so for the last three hours of a Pacific day this is already
+    // tomorrow's date -- see getGameDate). Zero-padded ISO date strings compare
+    // lexically in chronological order, and `value` is validated as YYYY-MM-DD by
+    // the date param matcher. Mode-independent: every mode unlocks the same day
+    // at the same instant.
+    return value > getGameDate();
 }
 
 // Dates before a mode's day 1 are not part of that game. Without this they are

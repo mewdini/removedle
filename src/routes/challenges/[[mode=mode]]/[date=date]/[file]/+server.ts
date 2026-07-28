@@ -32,9 +32,9 @@ export const GET: RequestHandler = async ({ params, platform }) => {
     }
 
     // The gate. Challenges are generated and uploaded ahead of time, so the
-    // bucket holds future days, and they must not be readable until 00:00 Pacific
-    // on the day itself. Every player in the world crosses this boundary at the
-    // same instant, in every mode.
+    // bucket holds future days, and they must not be readable until 21:00 Pacific
+    // on the evening the day goes live. Every player in the world crosses this
+    // boundary at the same instant, in every mode.
     if (isFutureChallengeDate(date)) {
         throw error(404, 'Not found');
     }

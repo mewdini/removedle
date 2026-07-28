@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { runFfmpeg } from './lib/ffmpeg.js';
 import { BUCKETS, readObject } from './lib/r2.js';
 import { modeDirs, parseMode } from './lib/modes.js';
+import { gameDate } from './lib/dates.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,7 +22,11 @@ const VOLUME_THRESHOLD = -35;
 const MAX_RETRIES = 5;
 const DEDUPLICATE_DAYS = 5;
 const MAX_PER_ALBUM = 2;
-const TODAY_DATE = new Date().toISOString().split('T')[0];
+// Fallback for a bare `pnpm generate`. The live game day, not the UTC day: the
+// two differ for most of the evening, and picking the wrong one here does not
+// fail loudly -- the date is the PRNG seed, so it would quietly produce a
+// different but entirely valid-looking challenge under the wrong filename.
+const TODAY_DATE = gameDate();
 
 // The answer pool must be exactly what the catalog publishes.
 //
@@ -105,8 +110,10 @@ async function getMeanVolume(masterPath, startTime, duration) {
     }
 }
 
-// All date arithmetic here is UTC, matching the rest of the app (challenge dates
-// are UTC days). Using the local-time accessors instead is correct for fixed
+// Purely relative string math: "the five labels before this label". It never
+// asks what day it is now, so the reset hour does not enter into it. The UTC
+// pinning is only to keep the arithmetic on clean date strings. Using the
+// local-time accessors instead is correct for fixed
 // offsets but silently wrong across a DST transition: the changing offset shifts
 // the computed instant by an hour, which can step over a UTC midnight. On a
 // machine in a DST-observing zone, generating 2026-11-03 skipped 2026-11-01 and

@@ -11,7 +11,7 @@
     import { getSettingsContext } from '$lib/settings.svelte';
     import { calculatePoints } from '$lib/gameUtils';
     import { invalidate } from '$app/navigation';
-    import { calculateDays, getTodayDate } from '$params/date';
+    import { calculateDays, getGameDate } from '$params/date';
     import { gameStorageKey, modeParam, resolveMode, statsStorageKey } from '$lib/modes';
 
     const { data } = $props();
@@ -24,7 +24,10 @@
     const mode = $derived(resolveMode(data.mode));
     const settings = getSettingsContext();
     const player = createSharedSnippetPlayer();
-    const isToday = $derived(date === getTodayDate());
+    const isToday = $derived(date === getGameDate());
+    // Set only by the undated route, which always renders whatever day is live.
+    // The dated route's date is pinned by the URL and must never self-refresh.
+    const live = $derived(!!data.live);
 
     const searcher = $derived(
         new Searcher(songList, {
@@ -121,9 +124,9 @@
                                 : '';
 
                         if (stats.lastChallengeCompletedDate !== '') {
-                            const today = getTodayDate();
+                            const liveDate = getGameDate();
                             const diff = Math.round(
-                                calculateDays(stats.lastChallengeCompletedDate, today)
+                                calculateDays(stats.lastChallengeCompletedDate, liveDate)
                             );
                             if (diff > 2) {
                                 stats.currentStreak = 0;
@@ -240,6 +243,43 @@
 
             stats.lastChallengeCompletedDate = date;
         }
+    });
+
+    // A board is "in progress" once a guess has been made and while any round is
+    // still playable. An untouched board has nothing to lose, and a finished one
+    // has already been saved to D1 and stays readable at its dated URL.
+    const inProgress = $derived(
+        gameState.roundGuesses.some((round) => round.length > 0) &&
+            gameState.roundStatuses.some((status) => status === 'playing')
+    );
+
+    // The 21:00 PT rollover under an open tab. Nothing else notices it: the page
+    // loads run on the server, so a tab left open would sit on the previous day
+    // until someone reloaded. Far more likely to be seen at 9pm than at midnight,
+    // which is why it is handled at all.
+    //
+    // Refreshes only the day-scoped dependency, not invalidateAll(): the layout
+    // load keys on params.mode, so invalidating everything would re-fetch and
+    // re-serialise the whole song catalog just to move the date on.
+    $effect(() => {
+        if (!live || loading) return;
+
+        function check() {
+            // `date` null means the live day has no challenge at all. Refreshing
+            // on that would spin every 30s, since there is no date to compare.
+            if (!date || inProgress) return;
+            if (getGameDate() !== date) invalidate('app:day');
+        }
+
+        const poll = setInterval(check, 30_000);
+        // A backgrounded tab has its timers throttled hard, so re-check the
+        // moment it comes back rather than waiting out the next tick.
+        document.addEventListener('visibilitychange', check);
+
+        return () => {
+            clearInterval(poll);
+            document.removeEventListener('visibilitychange', check);
+        };
     });
 
     function submitGuess(title: string, id: string) {

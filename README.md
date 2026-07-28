@@ -33,7 +33,7 @@ A fork of [underscordle](https://github.com/angelolz/underscordle) by [angelolz]
 - Player progress and streaks live in `localStorage`. D1 stores only aggregate `totalGames` / `totalPoints` per date.
 - Song metadata and album art are served publicly from R2 via `assets.removedle.org`.
 - Daily snippets live in a **private** R2 bucket and are served through `src/routes/challenges/[date=date]/[file]`, which refuses any date later than today. Challenges are generated the day before, so a public bucket would leak upcoming answers.
-- Dates are UTC everywhere, so a challenge unlocks worldwide at the same instant: 00:00 UTC.
+- The game day rolls over at **9pm Pacific**, so a challenge unlocks worldwide at the same instant regardless of where the player is.
 
 ## Local Development Setup
 
@@ -119,7 +119,7 @@ ALLOW_LOCAL_DEPLOY=1 pnpm deploy:prod
 
 Two GitHub Actions handle content:
 
-- **Daily Challenges**: cron at 05:00 UTC, generates the next day and pushes to R2
+- **Daily Challenges**: cron at 06:09 UTC, generates the next game day and pushes to R2
 - **Sync Metadata**: manual, re-scans masters and republishes metadata and art
 
 `node scripts/sync-r2.js [pull-masters|pull-data|pull-art|push-masters|push-data|push-challenges]` moves data between `out/` and R2. `push-masters` skips objects already uploaded.
