@@ -14,6 +14,7 @@ const DIRS = modeDirs(MODE);
 
 const DATA_DIR = DIRS.data;
 const REGISTRY_FILE = path.join(DATA_DIR, 'song-registry.json');
+const SONGLIST_FILE = path.join(DATA_DIR, 'songs.json');
 const MASTERS_DIR = DIRS.masters;
 const OUTPUT_BASE_DIR = DIRS.dailies;
 const VOLUME_THRESHOLD = -35;
@@ -21,6 +22,38 @@ const MAX_RETRIES = 5;
 const DEDUPLICATE_DAYS = 5;
 const MAX_PER_ALBUM = 2;
 const TODAY_DATE = new Date().toISOString().split('T')[0];
+
+// The answer pool must be exactly what the catalog publishes.
+//
+// `songs.json` is the catalog: it is what the game loads, what the fuzzy search
+// autocompletes, what the results screen resolves an answer's title from, and
+// what the catalog browser lists. The REGISTRY is a superset of it, because
+// scan-songs.js never removes an entry -- retiring a master (moving it to
+// masters/_excluded/) drops it from songs.json but leaves its registry row
+// behind forever.
+//
+// Drawing from the registry therefore lets a retired track become an answer that
+// is not in the catalog, and that is worse than an inconsistent listing: the
+// title is absent from the searcher, so the round cannot be guessed, and
+// Results.svelte resolves the reveal against songList and renders nothing.
+//
+// Checking that the master file exists is NOT sufficient. `push-masters` only
+// ever uploads, so a retired master stays in the music bucket and CI's
+// `pull-masters` brings it back -- the file is present on the runner even though
+// it is gone locally and absent from the catalog.
+//
+// A missing or unreadable songs.json throws rather than falling back to the whole
+// registry: the fallback is precisely the bug this closes, and a challenge that
+// silently goes unguessable is worse than a run that fails loudly. The workflow
+// runs `pull-data` before this, so the file is always there.
+async function loadCatalogIds() {
+    const raw = await fs.readFile(SONGLIST_FILE, 'utf-8');
+    const songs = JSON.parse(raw);
+    if (!Array.isArray(songs) || songs.length === 0) {
+        throw new Error(`${SONGLIST_FILE} is empty or malformed -- run \`pnpm scan\` first`);
+    }
+    return new Set(songs.map((s) => s.id));
+}
 
 function createSeededRandom(seed) {
     let hash = crypto.createHash('sha256').update(seed).digest('hex');
@@ -141,10 +174,24 @@ async function generateDaily() {
         const previousSongsSet = await getPreviousSongIds(dateArg);
 
         const registry = JSON.parse(await fs.readFile(REGISTRY_FILE, 'utf-8'));
-        const songIds = Object.keys(registry);
+
+        // Pool = registry entries the published catalog still lists. See
+        // loadCatalogIds: the registry is a superset, and the difference is
+        // retired tracks that would be unguessable if drawn.
+        const catalogIds = await loadCatalogIds();
+        const songIds = Object.keys(registry).filter((id) => catalogIds.has(id));
+        const retired = Object.keys(registry).filter((id) => !catalogIds.has(id));
+
+        if (retired.length) {
+            console.log(
+                `Excluding ${retired.length} registry entr${retired.length === 1 ? 'y' : 'ies'} not in the catalog: ` +
+                    retired.map((id) => `"${registry[id].title}"`).join(', ')
+            );
+        }
+        console.log(`Pool: ${songIds.length} of ${Object.keys(registry).length} registry entries.`);
 
         if (songIds.length < 5) {
-            throw new Error('Not enough songs in registry (need at least 5)');
+            throw new Error('Not enough songs in the catalog (need at least 5)');
         }
 
         // Seeded per mode as well as per date, so two modes generating the same

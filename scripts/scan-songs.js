@@ -7,6 +7,7 @@ import { encode } from '@msgpack/msgpack';
 import { runFfmpeg } from './lib/ffmpeg.js';
 import { modeDirs, NON_ALBUM_LABELS, parseMode } from './lib/modes.js';
 import { findDuplicates } from './lib/similarity.js';
+import { todayPacific } from './lib/dates.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +26,68 @@ const COVERS_OUTPUT_FILE = path.join(DATA_DIR, 'covers.json');
 const COVERS_MIN_OUTPUT_FILE = path.join(DATA_DIR, 'covers.min.json');
 
 const SUPPORTED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg'];
+
+const TODAY = todayPacific();
+
+// Provenance for the in-game catalog browser, which badges recent arrivals and
+// retitles so it doubles as a changelist.
+//
+// Three cases, and the middle one is what makes this need no backfill script:
+//   - no existing entry            -> genuinely new, stamp today
+//   - existing entry, no addedAt   -> predates this field, so it was in the
+//                                     catalog at launch: stamp the mode's day 1
+//   - existing entry with addedAt  -> carry it, forever
+// Seeding the launch batch with startDate rather than today is what stops the
+// first scan after this change from badging all 137 tracks as new, and the
+// browser treats "added on day 1" as the baseline rather than as an event.
+//
+// Only TITLE and ALBUM changes count as an update. Both are player-visible (the
+// title is literally the answer they type, the album picks the cover art), and
+// both are rare and deliberate -- the `untitled` -> `BEGGIN ON YOUR KNEES` fix
+// is exactly the case worth surfacing. contentHash changes are excluded on
+// purpose: a re-tag or re-encode moves the hash without changing anything a
+// player can see, and those happen often enough to drown the list.
+//
+// Returns the fields to persist SEPARATELY from whether the change happened on
+// this run, because `previousTitle` is carried forward forever once set --
+// reading it back as "a retitle just happened" would re-announce the same edit
+// in the scan log on every run from now on.
+function trackProvenance(existingEntry, title, albumName) {
+    if (!existingEntry) {
+        return { fields: { addedAt: TODAY }, retitled: false, rebadged: false };
+    }
+
+    const addedAt = existingEntry.addedAt || MODE.startDate;
+    const retitled = existingEntry.title !== title;
+    const rebadged = existingEntry.album !== albumName;
+
+    // A change record replaces the previous one wholesale rather than merging,
+    // so `previousAlbum` never lingers next to a later title-only edit and
+    // describes a change that is two revisions old.
+    if (retitled || rebadged) {
+        return {
+            fields: {
+                addedAt,
+                updatedAt: TODAY,
+                previousTitle: retitled ? existingEntry.title : undefined,
+                previousAlbum: rebadged ? existingEntry.album : undefined,
+            },
+            retitled,
+            rebadged,
+        };
+    }
+
+    return {
+        fields: {
+            addedAt,
+            updatedAt: existingEntry.updatedAt,
+            previousTitle: existingEntry.previousTitle,
+            previousAlbum: existingEntry.previousAlbum,
+        },
+        retitled: false,
+        rebadged: false,
+    };
+}
 
 async function getFileHash(filePath) {
     const content = await fs.readFile(filePath);
@@ -129,6 +192,30 @@ async function reportDuplicates(registry) {
     );
 }
 
+// The registry is a superset of the catalog: this script only ever adds and
+// updates, so an entry whose master has been moved out of the masters directory
+// is carried forward untouched and silently outlives the track.
+//
+// generate-daily.js now refuses to draw those (its pool is the catalog, not the
+// registry), so a leftover row can no longer produce an unguessable round. It is
+// still dead weight that makes the two files disagree, and only a human can
+// decide whether a master went missing on purpose, so say so.
+function reportRetired(registry, songList) {
+    const live = new Set(songList.map((s) => s.id));
+    const retired = Object.keys(registry).filter((id) => !live.has(id));
+    if (!retired.length) return;
+
+    console.warn(`\n⚠ ${retired.length} registry entr(y/ies) have no master in ${MASTERS_DIR}:`);
+    for (const id of retired) {
+        console.warn(`   ${id}  "${registry[id].title}"  (${registry[id].filename})`);
+    }
+    console.warn(
+        '  They are excluded from the catalog and from daily generation. If a track was\n' +
+            '  retired on purpose, DELETE its entry from song-registry.json to match; if not,\n' +
+            '  the master is missing and should be restored before the next scan.'
+    );
+}
+
 async function scanSongs() {
     try {
         console.log(`Mode: ${MODE.id}`);
@@ -208,6 +295,14 @@ async function scanSongs() {
                     console.log(`  New song detected. Assigned ID: ${foundId}`);
                 }
 
+                const provenance = trackProvenance(existingEntry, title, albumName);
+                if (provenance.retitled) {
+                    console.log(`  Retitled: "${existingEntry.title}" -> "${title}"`);
+                }
+                if (provenance.rebadged) {
+                    console.log(`  Album changed: "${existingEntry.album}" -> "${albumName}"`);
+                }
+
                 registry[foundId] = {
                     filename: file,
                     title,
@@ -215,6 +310,10 @@ async function scanSongs() {
                     album: albumName,
                     duration,
                     contentHash,
+                    // Owned by scan-songs.js like the master fields above, not by
+                    // resolve-links.js: they are derived from the tags and from
+                    // what the previous scan saw, so nothing else writes them.
+                    ...provenance.fields,
                     links: existingEntry?.links || {},
                     // Preserve resolve-links.js state across re-scans (undefined
                     // keys drop out of JSON). scan-songs.js owns only the master
@@ -251,12 +350,16 @@ async function scanSongs() {
                     albumsMap.set(slug, album);
                 }
 
+                // Published so the catalog browser can badge and sort without a
+                // second manifest. Undefined keys drop out of JSON.stringify, so
+                // an unchanged track costs one extra field, not four.
                 songList.push({
                     id: foundId,
                     title,
                     artist,
                     album: albumName,
                     links: registry[foundId].links,
+                    ...provenance.fields,
                 });
             }
         }
@@ -274,6 +377,7 @@ async function scanSongs() {
         console.log(`\nSuccess! Generated manifest for ${songList.length} songs.`);
         console.log(`Output saved to: ${SONGLIST_OUTPUT_FILE}`);
 
+        reportRetired(registry, songList);
         await reportDuplicates(registry);
     } catch (error) {
         console.error('Error scanning songs:', error);

@@ -6,9 +6,11 @@
         CogOutline,
         ExclamationCircleOutline,
         GithubSolid,
+        ListMusicOutline,
         QuestionCircleOutline,
     } from 'flowbite-svelte-icons';
     import Modal from './Modal.svelte';
+    import CatalogModal from './CatalogModal.svelte';
     import Logo from './Logo.svelte';
     import StreamingLinks from './game/StreamingLinks.svelte';
     import { themes } from '$lib/themes';
@@ -23,6 +25,7 @@
     } = $props();
     let showHelpModal = $state(false);
     let showSettingsModal = $state(false);
+    let showCatalogModal = $state(false);
     let inputVolume = $derived(volume);
 
     $effect(() => {
@@ -119,6 +122,18 @@
                 ><ArchiveOutline class="h-8 w-8 shrink-0" /></a
             ></span
         >
+        <!-- Next to the archive rather than next to settings: both are ways of
+             looking at the game's contents, where help and settings are about
+             the session you are in. -->
+        <span class="flex items-center transition-all hover:scale-105 active:scale-95"
+            ><button
+                aria-label="Song catalog"
+                title="Song catalog"
+                onclick={() => {
+                    showCatalogModal = true;
+                }}><ListMusicOutline class="h-8 w-8 shrink-0 cursor-pointer" /></button
+            ></span
+        >
         <span class="flex items-center transition-all hover:scale-105 active:scale-95"
             ><button
                 onclick={() => {
@@ -141,6 +156,13 @@
     </div>
     <hr class="h-3 w-full max-w-[280px] border-theme-muted sm:max-w-sm" />
 </div>
+
+<CatalogModal
+    revealed={showCatalogModal}
+    onClose={() => {
+        showCatalogModal = false;
+    }}
+/>
 
 <Modal
     revealed={showHelpModal}

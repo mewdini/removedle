@@ -6,6 +6,19 @@ export interface Song {
     title: string;
     album: string;
     links: StreamingLinks;
+    /**
+     * Catalog provenance, stamped by scripts/scan-songs.js and used only by the
+     * catalog browser. All optional: a manifest published before these existed
+     * simply has none, and every consumer treats that as "no badge".
+     *
+     * `addedAt` on a mode's startDate means "part of the launch catalog", which
+     * is the baseline rather than an event -- see trackProvenance() in the scan.
+     * `previous*` describe the change `updatedAt` refers to.
+     */
+    addedAt?: string;
+    updatedAt?: string;
+    previousTitle?: string;
+    previousAlbum?: string;
 }
 
 export interface Guess {

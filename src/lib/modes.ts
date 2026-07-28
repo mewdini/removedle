@@ -81,6 +81,14 @@ export const metaUrl = (mode: ModeConfig, date: string) =>
 export const snippetUrl = (mode: ModeConfig, date: string, round: number, guess: number) =>
     `${CHALLENGES_URL}/${mode.prefix}${date}/round-${round}-guess-${guess}.opus`;
 
+// Same-origin proxy for a mode's catalog, used by the catalog browser to show a
+// mode other than the one being played (see src/routes/catalog/[[mode=mode]]).
+// An absolute path on purpose: resolve() returns URLs relative to the current
+// route, which would make this land on a different path depending on which page
+// the modal was opened from.
+export const catalogFeedUrl = (mode: ModeConfig) =>
+    mode.segment ? `/catalog/${mode.segment}` : '/catalog';
+
 export const gameStorageKey = (mode: ModeConfig, date: string) =>
     `removedle-${mode.storagePrefix}${date}`;
 export const statsStorageKey = (mode: ModeConfig) => `removedle-${mode.storagePrefix}stats`;
