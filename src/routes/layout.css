@@ -1,6 +1,24 @@
 @import 'tailwindcss';
 @source '../node_modules/flowbite-svelte-icons/dist';
 
+/* Display face for the WORDMARK ONLY. Royal2 draws exactly 26 characters: A-Z.
+   Its cmap advertises 37 codepoints, but space, & , ' and the digits 1-8 are
+   empty slots -- zero-length loca entries with no outline data -- so they are
+   worse than missing. A missing glyph falls back to another font; these render
+   as invisible advance width, because the browser believes the font covers them
+   and never substitutes. Verified against the binary, not just on screen.
+
+   The practical rule: never put this on anything but the site name. Applied to
+   'Day #5' or a date, the digits would silently disappear. font-display: swap
+   keeps the title readable in Poppins while the 57 KB file loads. */
+@font-face {
+    font-family: 'Royal2';
+    src: url('../lib/assets/fonts/Royal2.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
 @theme {
     --color-primary-50: #eff6ff;
     --color-primary-100: #dbeafe;
