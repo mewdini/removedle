@@ -17,6 +17,10 @@ jobs:
     sync:
         if: github.repository == 'mewdini/removedle' && github.actor == 'mewdini'
         runs-on: ubuntu-latest
+        # contents: read for checkout only -- this job never writes to the repo,
+        # it pulls/pushes R2 over the R2_* secrets, not the GITHUB_TOKEN.
+        permissions:
+            contents: read
         env:
             MODE_INPUT: ${{ github.event.inputs.mode || 'both' }}
         steps:
