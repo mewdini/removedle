@@ -13,26 +13,26 @@ export const themes = {
         card: 'rgba(0, 0, 0, 0.05)',
         muted: '#4b5563',
     },
-    cypress: {
-        bg: '#0c1e2e',
-        text: '#dedfd2',
-        accent: '#04764e',
+    foible: {
+        bg: '#12141c',
+        text: '#dbe5eb',
+        accent: '#5b6f9e',
         card: 'rgba(255, 255, 255, 0.05)',
-        muted: '#2B6278',
+        muted: '#6f7690',
     },
-    valetudinarian: {
-        bg: '#4a3b09',
-        text: '#E7DDA2',
-        accent: '#c59534',
-        card: 'rgba(255, 255, 255, 0.05)',
-        muted: '#9a7e2b',
-    },
-    papaya: {
-        bg: '#ffee62',
-        text: '#e70274',
-        accent: '#f5b160',
+    enclave: {
+        bg: '#fbeee3',
+        text: '#3f3231',
+        accent: '#c97b3d',
         card: 'rgba(0, 0, 0, 0.05)',
-        muted: '#837A38',
+        muted: '#8a7263',
+    },
+    vendetta: {
+        bg: '#181210',
+        text: '#f0d9c8',
+        accent: '#c1571f',
+        card: 'rgba(255, 255, 255, 0.05)',
+        muted: '#8a5f45',
     },
 } as const;
 
