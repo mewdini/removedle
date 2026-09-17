@@ -102,3 +102,13 @@ export type SharedSnippetPlayer = {
     getCurrentSrc(): string | null;
     isPlaying(src: string): boolean;
 };
+
+export type TipSegment = {
+    text: string;
+    href?: string;
+    bold?: boolean;
+};
+
+export type Tip = {
+    segments: TipSegment[];
+};

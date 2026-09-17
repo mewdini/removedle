@@ -1,8 +1,13 @@
 <script lang="ts">
-    import type { Guess, GuessStatus, Song } from '$lib/interfaces';
+    import type { Guess, GuessStatus, Song, Tip } from '$lib/interfaces';
     import { MAX_ROUNDS, GUESSES_PER_ROUND, SITE } from '$lib/statics';
     import { MODES, modeParam, snippetUrl } from '$lib/modes';
-    import { AngleLeftOutline, AngleRightOutline, ShareNodesOutline } from 'flowbite-svelte-icons';
+    import {
+        AngleLeftOutline,
+        AngleRightOutline,
+        LightbulbOutline,
+        ShareNodesOutline,
+    } from 'flowbite-svelte-icons';
     import AlbumArt from './AlbumArt.svelte';
     import ResultIcon from './ResultIcon.svelte';
     import TimerLeft from './TimerLeft.svelte';
@@ -10,11 +15,18 @@
     import { resolve } from '$app/paths';
     import { calculatePoints, calculateRoundsCorrect } from '$lib/gameUtils';
     import StreamingLinks from './StreamingLinks.svelte';
+    import { onMount } from 'svelte';
+    import { chooseTip } from '$lib/tipChooser';
 
     const { day, isToday, date, mode, songList, dailyMeta, gameState, player, globalData, stats } =
         $props();
     const SHARE_TEXT = 'Copy Score';
     let copyText = $state(SHARE_TEXT);
+    let selectedTip: Tip | null = $state(null);
+
+    onMount(() => {
+        selectedTip = chooseTip();
+    });
 
     let expandedSongs = $state<boolean[]>(Array(MAX_ROUNDS).fill(false));
 
@@ -224,6 +236,29 @@
                 </span>
             {/if}
         </div>
+        {#if selectedTip}
+            <div class="flex flex-col items-center">
+                <span class="flex flex-row items-center gap-1">
+                    <LightbulbOutline class="h-5 w-5 shrink-0" />
+                    <span class="font-bold">Did you know?</span>
+                </span>
+                <p class="text-center text-sm">
+                    {#each selectedTip.segments as segment (segment)}
+                        {#if segment.href}
+                            <a
+                                class="underline"
+                                class:font-bold={segment.bold}
+                                href={segment.href}
+                                target="_blank"
+                                rel="external noopener noreferrer">{segment.text}</a
+                            >
+                        {:else}
+                            <span class:font-bold={segment.bold}>{segment.text}</span>
+                        {/if}
+                    {/each}
+                </p>
+            </div>
+        {/if}
         <!-- Share and the Challenger hand-off are peer actions on the same row,
              split by a rule. As a full-width banner below the card the hand-off
              read as an ad for another product rather than as something to do
