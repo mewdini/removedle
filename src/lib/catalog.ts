@@ -87,6 +87,22 @@ export function releaseYear(song: Song): string | null {
     return song.releaseDate ? song.releaseDate.slice(0, 4) : null;
 }
 
+// releaseKey() of each album's earliest track, keyed by album name
+// Comparing one song's release date against another's picks the wrong album order: a bonus-track reissue
+// can carry a later date than the rest of the album, making it read as newer than it actually is
+// The earliest date any of its tracks carries is the closest proxy available for when the release itself came out
+// An album with no dated tracks is simply absent from the map, matching releaseKey()'s own empty-string reading
+export function albumReleaseKeys(songs: Song[]): Map<string, string> {
+    const keys = new Map<string, string>();
+    for (const song of songs) {
+        const key = releaseKey(song);
+        if (!key) continue;
+        const existing = keys.get(song.album);
+        if (!existing || key < existing) keys.set(song.album, key);
+    }
+    return keys;
+}
+
 /** What actually changed, for the line under an `updated` track. */
 export function describeChange(song: Song): string | null {
     const parts: string[] = [];

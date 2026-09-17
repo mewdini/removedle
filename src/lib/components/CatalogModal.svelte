@@ -12,6 +12,7 @@
         type ModeId,
     } from '$lib/modes';
     import {
+        albumReleaseKeys,
         catalogFlag,
         describeAge,
         describeChange,
@@ -54,7 +55,7 @@
     // Each pill also carries a title attribute spelling it out in full
     const SORTS = [
         ['title', 'A-Z', 'Sort by title'],
-        ['album', 'Album', 'Sort by album, then by title within it'],
+        ['album', 'Album', 'Sort by album release order, then by track order within it'],
         ['release', 'Year', 'Sort by release date, newest music first'],
         ['recent', 'Updated', 'Sort by what was most recently added to or changed in the catalog'],
     ] as const satisfies readonly (readonly [SortKey, string, string])[];
@@ -115,6 +116,9 @@
     const songs = $derived(catalog?.songList ?? []);
     const albums = $derived(catalog?.albums ?? []);
     const matches = $derived(songs.filter((s) => matchesQuery(s, query)));
+    // Computed over the whole browsed catalog, not `matches`, so filtering
+    // down to a search doesn't reorder albums relative to each other
+    const albumOrder = $derived(albumReleaseKeys(songs));
 
     const flagged = $derived(
         matches
@@ -134,15 +138,29 @@
     const ordered = $derived(
         [...matches].sort((a, b) => {
             switch (sort) {
-                case 'album':
+                case 'album': {
+                    // Albums ordered by their own earliest track (albumOrder, see
+                    // $lib/catalog), newest first, matching the Year sort's direction
+                    // Undated albums go to the end, same convention as Year
+                    const ra = albumOrder.get(a.album) ?? '';
+                    const rb = albumOrder.get(b.album) ?? '';
+                    if (ra !== rb) return !ra || !rb ? (ra ? -1 : 1) : rb.localeCompare(ra);
+                    // Same album: the track's own position on the release
+                    // Falls back to title when either side has no track number, since
+                    // an untagged track can't be placed against its numbered neighbors
                     // Under challenger's singlesAsOwnAlbum every loosie is its own
-                    // one-track "album" named after the track, so this degenerates
-                    // to a title sort over there. That is the honest answer for a
-                    // catalog with no albums in it, not a case to special-case
-                    return (
-                        a.album.localeCompare(b.album, undefined, { sensitivity: 'base' }) ||
-                        byTitle(a, b)
-                    );
+                    // one-track "album", so two different loosies only reach this
+                    // branch on a shared release date, and title is the right
+                    // tiebreak there too
+                    if (
+                        a.trackNumber != null &&
+                        b.trackNumber != null &&
+                        a.trackNumber !== b.trackNumber
+                    ) {
+                        return a.trackNumber - b.trackNumber;
+                    }
+                    return byTitle(a, b);
+                }
                 case 'release': {
                     // Newest release first, matching the direction of "Updated".
                     // Tracks with no date go to the END: an empty sort key would

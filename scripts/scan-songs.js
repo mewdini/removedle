@@ -386,6 +386,11 @@ async function scanSongs() {
                 const title = metadata.common.title || path.basename(file, ext);
                 const albumName = effectiveAlbum(metadata.common.album || 'Unknown Album', title);
                 const artist = normalizeArtist(metadata.common.artist || 'Unknown Artist');
+                // Only meaningful within the SAME album, so it rides along
+                // unconditionally rather than being cleared when effectiveAlbum()
+                // rewrites a filing label to the track's own title
+                // A one-track "album" has nothing for it to conflict with
+                const trackNumber = metadata.common.track?.no ?? undefined;
                 const duration = Math.floor(metadata.format.duration * 1000) / 1000;
                 const contentHash = await getFileHash(fullPath);
 
@@ -456,6 +461,7 @@ async function scanSongs() {
                     title,
                     artist,
                     album: albumName,
+                    trackNumber,
                     duration,
                     releaseDate,
                     contentHash,
@@ -512,6 +518,7 @@ async function scanSongs() {
                     title,
                     artist,
                     album: albumName,
+                    trackNumber,
                     releaseDate,
                     links: registry[foundId].links,
                     ...provenance.fields,

@@ -111,7 +111,12 @@ export const DEFAULT_MODE = MODES.normal;
 // Album tags that are filing labels rather than records. Under
 // `singlesAsOwnAlbum` a track tagged with one of these gets its title as its
 // effective album, so it groups, caps and gets cover art as its own release
-export const NON_ALBUM_LABELS = new Set(['Singles', 'Singles & EPs', 'Loosies']);
+export const NON_ALBUM_LABELS = new Set([
+    'Singles',
+    'Singles & EPs',
+    'Loosies',
+    'Demos, Leaks, Alternate Versions',
+]);
 
 // Local directory layout.
 //
