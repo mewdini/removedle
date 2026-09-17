@@ -2,6 +2,7 @@
     import { ChevronDoubleRightOutline, PauseSolid, PlaySolid } from 'flowbite-svelte-icons';
     import SearchResults from './SearchResults.svelte';
     import type { Song } from '$lib/interfaces';
+    import { MAX_SEARCH_RESULTS } from '$lib/statics';
 
     const { guessIndex, isActive, guesses, searcher, submitGuess, src, result, player } = $props();
     let searchTerm = $state('');
@@ -18,7 +19,7 @@
 
     $effect(() => {
         if (isCurrentGuess() && searchTerm.trim().length > 0) {
-            results = searcher.search(searchTerm).slice(0, 5);
+            results = searcher.search(searchTerm).slice(0, MAX_SEARCH_RESULTS);
         } else {
             results = [];
         }

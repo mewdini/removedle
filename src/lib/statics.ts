@@ -2,6 +2,9 @@ import { dev } from '$app/environment';
 
 const MAX_ROUNDS = 5;
 const GUESSES_PER_ROUND = 3;
+// Shared by AudioCard (caps the fuzzy-search results it keeps) and
+// SearchResults (sizes its reserved dropdown space to that same worst case)
+const MAX_SEARCH_RESULTS = 5;
 // Day 1 is per mode and lives on the mode config (`startDate` in $lib/modes).
 // It is deliberately NOT duplicated here: a second copy would look
 // authoritative while being ignored by every date route and archive listing
@@ -110,6 +113,7 @@ function siteName(viaAlias: boolean): string {
 export {
     MAX_ROUNDS,
     GUESSES_PER_ROUND,
+    MAX_SEARCH_RESULTS,
     ASSETS_URL,
     CHALLENGES_URL,
     ERROR_LINES,
