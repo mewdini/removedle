@@ -30,6 +30,7 @@ A fork of [underscordle](https://github.com/angelolz/underscordle) by [angelolz]
 
 ## How it works
 
+- There are two independent games: **Normal** (the official 89-track catalog) and **Challenger** (`/challenger`, a separate catalog of obscure tracks). Mode config lives in `src/lib/modes.ts`, and almost every pipeline command takes a `--mode=challenger` flag.
 - Player progress and streaks live in `localStorage`. D1 stores only aggregate `totalGames` / `totalPoints` per date.
 - Song metadata and album art are served publicly from R2 via `assets.removedle.org`.
 - Daily snippets live in a **private** R2 bucket and are served through `src/routes/challenges/[date=date]/[file]`, which refuses any date later than today. Challenges are generated the day before, so a public bucket would leak upcoming answers.
@@ -77,13 +78,15 @@ This writes a SQLite file under `.wrangler/state/v3/d1` and applies the migratio
 
     Re-run `pnpm scan` whenever you add songs. Never re-run `pnpm bootstrap` on an existing registry: song IDs are permanent and referenced by every past challenge.
 
+    Every command above also takes `--mode=challenger` (or a `pnpm <cmd>:challenger` alias) to run the same steps against the Challenger catalog instead, reading from `masters/challenger/` and writing to `out/challenger/*`.
+
 3. Link the generated media into SvelteKit's static directory:
     - **Windows (PowerShell)**: `.\scripts\link-assets.ps1`
     - **macOS/Linux**: `chmod +x ./scripts/link-assets.sh && ./scripts/link-assets.sh`
 
 ### Run the dev server
 
-Set `START_DATE_STRING` in `src/lib/statics.ts` to your earliest generated challenge date, then:
+Set `startDate` on the relevant mode in `src/lib/modes.ts` to your earliest generated challenge date, then:
 
 ```bash
 pnpm dev
