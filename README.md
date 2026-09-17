@@ -30,7 +30,7 @@ A fork of [underscordle](https://github.com/angelolz/underscordle) by [angelolz]
 
 ## How it works
 
-- There are two independent games: **Normal** (the official 89-track catalog) and **Challenger** (`/challenger`, a separate catalog of obscure tracks). Mode config lives in `src/lib/modes.ts`, and almost every pipeline command takes a `--mode=challenger` flag.
+- There are two independent games: **Normal** (the official catalog) and **Challenger** (`/challenger`, a separate catalog of obscure tracks). Mode config lives in `src/lib/modes.ts`, and almost every pipeline command takes a `--mode=challenger` flag.
 - Player progress and streaks live in `localStorage`. D1 stores only aggregate `totalGames` / `totalPoints` per date.
 - Song metadata and album art are served publicly from R2 via `assets.removedle.org`.
 - Daily snippets live in a **private** R2 bucket and are served through `src/routes/challenges/[date=date]/[file]`, which refuses any date later than today. Challenges are generated the day before, so a public bucket would leak upcoming answers.
