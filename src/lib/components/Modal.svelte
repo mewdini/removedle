@@ -19,13 +19,17 @@
         transition:fly={{ y: 10, duration: 250 }}
         class="animate-fade-in animate fixed inset-0 z-50 flex items-center justify-center bg-black/65"
     >
+        <!-- flex-col + max-h-[90vh], scrolling only the inner body below, not
+             this box: the close button lives out here so it can never scroll
+             out of reach on a viewport short enough that the body needs to
+             scroll (the catalog on a short phone screen, mainly) -->
         <div
-            class="animate-fly-fade-in relative mx-3 w-full rounded-lg border-2 border-theme-text bg-theme-bg sm:mx-0 {maxWidth} {bodyClass}"
+            class="animate-fly-fade-in relative mx-3 flex max-h-[90vh] w-full flex-col rounded-lg border-2 border-theme-text bg-theme-bg sm:mx-0 {maxWidth}"
             style="box-shadow: 0 0 20px rgba(0,0,0,0.5);"
         >
             <button
                 onclick={onClose}
-                class="absolute top-2 right-2 cursor-pointer text-theme-muted transition-colors hover:text-theme-text"
+                class="absolute top-2 right-2 z-10 cursor-pointer text-theme-muted transition-colors hover:text-theme-text"
                 title="close"
             >
                 <svg
@@ -43,7 +47,12 @@
                     />
                 </svg>
             </button>
-            {@render children()}
+            <!-- min-h-0 overrides flexbox's default min-height:auto, which
+                 would otherwise let this child grow past the parent's
+                 max-h-[90vh] instead of scrolling -->
+            <div class="min-h-0 overflow-y-auto {bodyClass}">
+                {@render children()}
+            </div>
         </div>
     </div>
 {/if}
