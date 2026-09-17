@@ -17,6 +17,10 @@
     import { page } from '$app/state';
     import { MODE_LIST, modeParam, resolveMode, type ModeConfig } from '$lib/modes';
 
+    // The numeric id form, not /shotnochaser -- X redirects it to the current
+    // handle, so the link survives a username change
+    const TWITTER_PROFILE_URL = 'https://x.com/i/user/1745519259265196033';
+
     let {
         volume = $bindable(),
         theme = $bindable(),
@@ -80,7 +84,11 @@
     <!-- The byline belongs to the wordmark, not to the tagline: under the tagline
          it sat directly beneath the song citation and read as a credit for the
          song itself. -->
-    <p class="text-sm text-theme-text">by mewdini</p>
+    <p class="text-sm text-theme-text">
+        by <a class="hover:underline" target="_blank" rel="noreferrer" href={TWITTER_PROFILE_URL}
+            >mewdini</a
+        >
+    </p>
     <span class="px-4 text-center">
         <!-- The citation runs on from the quote rather than taking a line of its
              own, to keep the header stack short. A span rather than a p because
