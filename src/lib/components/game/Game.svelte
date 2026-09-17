@@ -5,7 +5,12 @@
     import type { GameState, GuessStatus, Song } from '$lib/interfaces';
     import Board from './Board.svelte';
     import Results from './Results.svelte';
-    import { AngleLeftOutline } from 'flowbite-svelte-icons';
+    import {
+        AngleLeftOutline,
+        DiscordSolid,
+        GithubSolid,
+        TwitterSolid,
+    } from 'flowbite-svelte-icons';
     import { resolve } from '$app/paths';
     import { createSharedSnippetPlayer } from '$lib/player.svelte';
     import { getSettingsContext } from '$lib/settings.svelte';
@@ -13,6 +18,12 @@
     import { invalidate } from '$app/navigation';
     import { calculateDays, getGameDate } from '$params/date';
     import { gameStorageKey, modeParam, resolveMode, statsStorageKey } from '$lib/modes';
+
+    // DM compose intent (not the profile) so a broken-challenge report lands directly in mewdini's inbox
+    // `text=` is dropped on purpose
+    // Twitter's client router strips it on the redirect from /messages/compose to /i/chat/.., so a prefilled message
+    // was never actually reaching the box
+    const TWITTER_DM_URL = 'https://x.com/messages/compose?recipient_id=1745519259265196033';
 
     const { data } = $props();
 
@@ -387,6 +398,34 @@
         class="flex flex-col items-center justify-center gap-4 p-10 text-center align-middle text-white"
     >
         <p>No challenge found for this date. Please let mewdini know about this!</p>
+        <span class="flex flex-row items-center gap-3">
+            <a
+                class="transition-all hover:scale-110 active:scale-90"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Find mewdini on Twitter"
+                title="Twitter"
+                href={TWITTER_DM_URL}><TwitterSolid class="h-5 w-5 shrink-0" /></a
+            >
+            <a
+                class="transition-all hover:scale-110 active:scale-90"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Find mewdini on Discord"
+                title="Discord"
+                href="https://discord.com/users/119320874548592650"
+                ><DiscordSolid class="h-5 w-5 shrink-0" /></a
+            >
+            <a
+                class="transition-all hover:scale-110 active:scale-90"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="File an issue on GitHub"
+                title="GitHub"
+                href="https://github.com/mewdini/removedle/issues"
+                ><GithubSolid class="h-5 w-5 shrink-0" /></a
+            >
+        </span>
         <a
             class="flex flex-row items-center gap-1 text-sm text-theme-muted"
             href={resolve('/[[mode=mode]]/archive', { mode: modeParam(mode) })}
