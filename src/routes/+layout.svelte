@@ -134,13 +134,14 @@
          convention request. -->
     <link rel="icon" type="image/png" sizes="32x32" href={favicon32} />
     <!-- iOS does not read the web app manifest for home-screen icons, so this
-         tag is the only thing that feeds it, and it needs its own file: iOS
-         composites onto black rather than the wallpaper, so the artwork's
-         transparent rounded corners would show as black notches under its
-         squircle mask. apple-touch-icon-180x180.png is favicon-180x180.png
-         flattened onto the artwork's #FAFAFA background. It stays full-bleed;
-         unlike the maskable icons below, iOS crops gently and doesn't need the
-         80% safe zone. -->
+         tag is the only thing that feeds it, and it needs its own file. The one
+         requirement it adds over a favicon is opacity: iOS composites an
+         apple-touch-icon onto black rather than onto the wallpaper, so the
+         artwork's own transparent rounded corners would show as black notches
+         under iOS's (wider) squircle mask. apple-touch-icon-180x180.png is
+         favicon-180x180.png flattened onto the artwork's #FAFAFA background.
+         It stays full-bleed; unlike the maskable icons below, iOS crops gently
+         and doesn't need the 80% safe zone. -->
     <link rel="apple-touch-icon" sizes="180x180" href={appleTouchIcon} />
     <link rel="icon" type="image/png" sizes="192x192" href={favicon192} />
     <link rel="icon" type="image/png" sizes="512x512" href={favicon512} />
