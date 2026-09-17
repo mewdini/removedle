@@ -353,7 +353,11 @@
                 days.
             </p>
 
-            <div class="max-h-[55vh] overflow-y-auto pr-1">
+            <!-- Fixed height, not just a cap: a short match count (or zero) used
+                 to size this area down to its own content, so the whole modal
+                 visibly shrank while narrowing a search and grew back on
+                 clearing it -->
+            <div class="h-[55vh] overflow-y-auto pr-1">
                 {#if matches.length === 0}
                     <p class="py-10 text-center text-sm text-theme-muted">
                         Nothing matches “{query.trim()}”.
