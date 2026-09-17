@@ -69,30 +69,36 @@ const ALT_MARKER = 'janedle';
 // no response header at all, to reclaim ~14 bytes that the browser drops on its
 // next real restart anyway. Renaming again is the fix if this ever recurs
 const ALT_COOKIE = 'via-janedle-v2';
-// Six hours, in seconds: how long the easter egg survives.
+// Bridges exactly one hop: the marker-trade redirect's own landing request can
+// never read Sec-Fetch-Site: same-origin, since it is still part of a
+// navigation that started outside this site. Without this, the persistence
+// check in the handle hook would clear ALT_COOKIE before the egg ever
+// rendered once. 30s is generous for one redirect even on a slow connection --
+// it is not a second copy of the egg's lifetime, just enough to let the
+// browser follow the Location header it was just given
+const ALT_HOP_COOKIE = 'via-janedle-hop';
+const ALT_HOP_COOKIE_MAX_AGE = 30;
+// Six hours, in seconds: an outer backstop on how long ALT_COOKIE can exist,
+// not what actually ends the egg -- that's the Sec-Fetch-Site check in the
+// handle hook.
 //
 // This was originally a SESSION cookie (no Max-Age, no Expires), on the theory
-// that "the browser closes" is the natural end of a visit. It is not, and that
-// is why this constant exists: mobile Safari and Chrome are effectively never
-// closed, and desktop Chrome's "Continue where you left off" restores session
-// cookies across a restart. So one trip through janedle.org branded the browser
-// indefinitely, and a later click from an unrelated site (the reported case was
-// a t.co link pointing straight at removedle.org, carrying no marker at all)
-// still rendered the egg. A session cookie states the intent without enforcing
-// it; only an explicit Max-Age enforces it.
+// that "the browser closes" is the natural end of a visit. It is not: mobile
+// Safari and Chrome are effectively never closed, and desktop Chrome's
+// "Continue where you left off" restores session cookies across a restart. So
+// one trip through janedle.org branded the browser indefinitely, and a later
+// click from an unrelated site (the reported case was a t.co link pointing
+// straight at removedle.org, carrying no marker at all) still rendered the
+// egg. Six hours replaced the session cookie as the first fix, bounding the
+// egg to one sitting.
 //
-// Six hours bounds the egg to one sitting. A round is 5 songs and a few
-// minutes, but a player may wander off and come back the same evening, and this
-// covers that comfortably. It is also a quarter of a day, so it can never reach
-// the next day's puzzle (the game rolls over every 24h at 21:00 PT) and a visit
-// arriving from somewhere else tomorrow is always unbranded, which is the
-// property that was actually broken.
-//
-// The window does NOT slide. The cookie is only ever written on the single hop
-// that carries ALT_MARKER, so the clock starts when the player came through the
-// alias and continued play never extends it. That is deliberate: re-stamping it
-// on every request would keep a daily player branded forever, which is the bug
-// again by another route
+// That fix still couldn't tell "clicked something on removedle.org" apart from
+// "arrived here fresh" -- both just look like "the cookie is present" to a bare
+// Max-Age check, so a direct visit to removedle.org within the six-hour window
+// still rendered the egg. That's exactly what got reported. Sec-Fetch-Site can
+// tell the two cases apart, so it now does the real work and this stays only
+// as a backstop: if that header were ever unavailable, the cookie still can't
+// outlive six hours
 const ALT_COOKIE_MAX_AGE = 6 * 60 * 60;
 
 // Takes the already-resolved flag rather than a hostname: the egg outlives the
@@ -113,6 +119,8 @@ export {
     ALT_MARKER,
     ALT_COOKIE,
     ALT_COOKIE_MAX_AGE,
+    ALT_HOP_COOKIE,
+    ALT_HOP_COOKIE_MAX_AGE,
     siteName,
     DESCRIPTION,
     SITE,

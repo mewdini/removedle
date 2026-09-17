@@ -1,5 +1,13 @@
 import type { Handle } from '@sveltejs/kit';
-import { ALT_COOKIE, ALT_COOKIE_MAX_AGE, ALT_HOST, ALT_MARKER, SITE } from '$lib/statics';
+import {
+    ALT_COOKIE,
+    ALT_COOKIE_MAX_AGE,
+    ALT_HOP_COOKIE,
+    ALT_HOP_COOKIE_MAX_AGE,
+    ALT_HOST,
+    ALT_MARKER,
+    SITE,
+} from '$lib/statics';
 
 export const handle: Handle = async ({ event, resolve }) => {
     const { url } = event;
@@ -22,49 +30,67 @@ export const handle: Handle = async ({ event, resolve }) => {
         });
     }
 
-    // Landed from the alias: trade the marker for a cookie, then bounce to the
-    // clean URL. The cookie is what lets the wordmark be server-rendered on
+    // Landed from the alias: trade the marker for two cookies, then bounce to
+    // the clean URL. ALT_COOKIE is what lets the wordmark be server-rendered on
     // every later page, so the egg never appears as a post-hydration flash, and
-    // it keeps the address bar shareable.
+    // it keeps the address bar shareable. ALT_HOP_COOKIE only bridges this one
+    // redirect -- see its comment in $lib/statics for why it has to exist
+    // separately from ALT_COOKIE.
     //
     // The egg belongs to the visit that came in through the alias, not to the
-    // browser forever, and ALT_COOKIE_MAX_AGE is what actually enforces that.
-    // This was a session cookie (no Max-Age, no Expires) until it turned out
-    // browsers do not really end sessions (phones are never closed and desktop
-    // Chrome restores session cookies on restart), so one trip through
-    // janedle.org rebranded every later visit made straight to removedle.org,
-    // including a fresh click from a link somewhere else. See $lib/statics for
-    // why the bound is six hours and why it deliberately does not slide.
+    // browser forever. What actually enforces that now is the Sec-Fetch-Site
+    // check below, not either cookie's Max-Age -- see $lib/statics for how that
+    // reasoning changed.
     //
     // Set-Cookie is written by hand rather than via event.cookies.set(), which
     // only applies to a response produced by resolve(), not to one constructed
-    // here. If the browser refuses the cookie the marker is still stripped, so
-    // this can only degrade to "no easter egg", never to a redirect loop
+    // here. If the browser refuses these cookies the marker is still stripped,
+    // so this can only degrade to "no easter egg", never to a redirect loop
     if (url.searchParams.has(ALT_MARKER)) {
         const target = new URL(url);
         target.searchParams.delete(ALT_MARKER);
-        const cookie = [
-            `${ALT_COOKIE}=1`,
-            `Max-Age=${ALT_COOKIE_MAX_AGE}`,
-            'Path=/',
-            'SameSite=Lax',
-            'HttpOnly',
-        ];
-        // Omitted in dev, where preview runs over plain http and a Secure cookie
-        // would simply be dropped
-        if (url.protocol === 'https:') cookie.push('Secure');
 
-        return new Response(null, {
-            status: 302,
-            headers: {
-                location: target.pathname + target.search,
-                'set-cookie': cookie.join('; '),
-            },
-        });
+        // Omitted in dev, where preview runs over plain http and a Secure
+        // cookie would simply be dropped
+        const secure = url.protocol === 'https:' ? '; Secure' : '';
+        // Two Set-Cookie headers, not one header holding both cookies -- a
+        // single Set-Cookie can only ever describe one cookie
+        const headers = new Headers({ location: target.pathname + target.search });
+        headers.append(
+            'set-cookie',
+            `${ALT_COOKIE}=1; Max-Age=${ALT_COOKIE_MAX_AGE}; Path=/; SameSite=Lax; HttpOnly${secure}`
+        );
+        headers.append(
+            'set-cookie',
+            `${ALT_HOP_COOKIE}=1; Max-Age=${ALT_HOP_COOKIE_MAX_AGE}; Path=/; SameSite=Lax; HttpOnly${secure}`
+        );
+
+        return new Response(null, { status: 302, headers });
     }
 
-    // Read once here so every load and component sees the same answer
-    event.locals.viaAlias = event.cookies.get(ALT_COOKIE) === '1';
+    // Read once here so every load and component sees the same answer. Whether
+    // the egg still applies is no longer just "is ALT_COOKIE present" -- see
+    // both comments below
+    const hasAliasCookie = event.cookies.get(ALT_COOKIE) === '1';
+    const secFetchSite = event.request.headers.get('sec-fetch-site');
+    // same-origin/same-site: a fetch or navigation this site itself started,
+    // i.e. the player is still using the site the alias sent them to. Anything
+    // else -- none, cross-site, or the header missing entirely -- is a fresh
+    // top-level arrival, which is exactly the case the egg should NOT survive.
+    // ALT_HOP_COOKIE is the one exception: it lets the marker-trade's own
+    // redirect land, since that landing request can never itself read
+    // same-origin (see the comment above where it's set)
+    const isContinuation =
+        secFetchSite === 'same-origin' ||
+        secFetchSite === 'same-site' ||
+        event.cookies.get(ALT_HOP_COOKIE) === '1';
+    event.locals.viaAlias = hasAliasCookie && isContinuation;
+
+    // A fresh arrival with a stale cookie: clear it now rather than let it ride
+    // along unused until Max-Age catches up, so nothing (a same-tab back
+    // navigation, a disk cache read) can resurrect the egg off a cookie that
+    // should already read as gone
+    if (hasAliasCookie && !isContinuation) event.cookies.delete(ALT_COOKIE, { path: '/' });
 
     // Defense-in-depth response headers on every Worker-rendered response. There is
     // no auth or injection sink today, so these are belt-and-suspenders: DENY blocks
@@ -84,8 +110,8 @@ export const handle: Handle = async ({ event, resolve }) => {
     // is a correctness bug even though nothing caches it today: a Cloudflare cache
     // rule added later, a corporate proxy, or the browser's own disk cache could
     // hand a janedle-branded page to a cookie-less request, or keep serving the
-    // unbranded page to someone who just earned the egg. The cookie-lifetime fix
-    // in $lib/statics closed the reported case; this closes the second route to
+    // unbranded page to someone who just earned the egg. The Sec-Fetch-Site
+    // check above closed the reported case; this closes the second route to
     // the same symptom.
     //
     // `Vary: Cookie` is the honest statement of what the body depends on, and it
