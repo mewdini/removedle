@@ -73,17 +73,23 @@ export const handle: Handle = async ({ event, resolve }) => {
     // both comments below
     const hasAliasCookie = event.cookies.get(ALT_COOKIE) === '1';
     const secFetchSite = event.request.headers.get('sec-fetch-site');
+    // A cookie is visible to every tab in the browser, not just the one that
+    // triggered the marker trade, so ALT_HOP_COOKIE has to be single-use: read
+    // once below and deleted in the same response, so it can only ever bridge
+    // whichever request reaches the server first. Without that, opening any
+    // other tab within its Max-Age window inherited the egg too, since that
+    // tab's own request carried the same browser-wide cookie
+    const hopCookieValid = event.cookies.get(ALT_HOP_COOKIE) === '1';
+    if (hopCookieValid) event.cookies.delete(ALT_HOP_COOKIE, { path: '/' });
     // same-origin/same-site: a fetch or navigation this site itself started,
     // i.e. the player is still using the site the alias sent them to. Anything
     // else -- none, cross-site, or the header missing entirely -- is a fresh
     // top-level arrival, which is exactly the case the egg should NOT survive.
-    // ALT_HOP_COOKIE is the one exception: it lets the marker-trade's own
+    // hopCookieValid is the one exception: it lets the marker-trade's own
     // redirect land, since that landing request can never itself read
-    // same-origin (see the comment above where it's set)
+    // same-origin (see the comment above where the cookie is set)
     const isContinuation =
-        secFetchSite === 'same-origin' ||
-        secFetchSite === 'same-site' ||
-        event.cookies.get(ALT_HOP_COOKIE) === '1';
+        secFetchSite === 'same-origin' || secFetchSite === 'same-site' || hopCookieValid;
     event.locals.viaAlias = hasAliasCookie && isContinuation;
 
     // A fresh arrival with a stale cookie: clear it now rather than let it ride

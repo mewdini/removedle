@@ -76,9 +76,14 @@ const ALT_COOKIE = 'via-janedle-v2';
 // never read Sec-Fetch-Site: same-origin, since it is still part of a
 // navigation that started outside this site. Without this, the persistence
 // check in the handle hook would clear ALT_COOKIE before the egg ever
-// rendered once. 30s is generous for one redirect even on a slow connection --
-// it is not a second copy of the egg's lifetime, just enough to let the
-// browser follow the Location header it was just given
+// rendered once.
+//
+// The handle hook deletes this cookie the moment it reads it, so it is
+// single-use as well as short-lived. A cookie is visible to every tab in the
+// browser, not just the one that set it, so without that a second tab opened
+// within this window would inherit the egg too, off a hop cookie meant for a
+// completely different request. 30s is a generous upper bound for one
+// redirect on a slow connection, not a real deadline most requests approach
 const ALT_HOP_COOKIE = 'via-janedle-hop';
 const ALT_HOP_COOKIE_MAX_AGE = 30;
 // Six hours, in seconds: an outer backstop on how long ALT_COOKIE can exist,
