@@ -1,11 +1,3 @@
-export type Theme = {
-    bg: string;
-    text: string;
-    accent: string;
-    card: string;
-    muted: string;
-};
-
 export const themes = {
     dark: {
         bg: '#121212',
