@@ -92,11 +92,14 @@ export const handle: Handle = async ({ event, resolve }) => {
         secFetchSite === 'same-origin' || secFetchSite === 'same-site' || hopCookieValid;
     event.locals.viaAlias = hasAliasCookie && isContinuation;
 
-    // A fresh arrival with a stale cookie: clear it now rather than let it ride
-    // along unused until Max-Age catches up, so nothing (a same-tab back
-    // navigation, a disk cache read) can resurrect the egg off a cookie that
-    // should already read as gone
-    if (hasAliasCookie && !isContinuation) event.cookies.delete(ALT_COOKIE, { path: '/' });
+    // ALT_COOKIE is deliberately left alone here, even on a fresh arrival that
+    // fails the continuation check. A cookie is visible to every tab, not just
+    // the one that made this request, so deleting it as a "cleanup" was
+    // deleting a still-legitimate session in another tab: tab A stays branded,
+    // tab B opens removedle.org fresh, and tab B's own correctly-unbranded
+    // response would wipe the cookie out from under tab A too. viaAlias above
+    // already reads correctly per request regardless of whether the cookie is
+    // present, so there's nothing this deletion was buying beyond that bug
 
     // Defense-in-depth response headers on every Worker-rendered response. There is
     // no auth or injection sink today, so these are belt-and-suspenders: DENY blocks
