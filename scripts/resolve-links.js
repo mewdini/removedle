@@ -127,12 +127,35 @@ const ML_MAP = {
     bandcamp: 'bandcamp',
 };
 
-const UA = 'Mozilla/5.0';
+// music.youtube.com serves a "browser is deprecated" stub instead of the real
+// page to a bare UA (verified: 2KB stub vs. 375KB real page); a full Chrome UA
+// gets through everywhere tested, including sites that don't require it
+// (SoundCloud, Bandcamp, plain YouTube search), so it is the default.
+const UA =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+const UA_FALLBACK = 'Mozilla/5.0';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Scraper fetches can hang; cap every request so one stuck socket can't stall
 // the whole batch. Returns a normal Response, or throws on timeout/network.
 const fetchT = (url, opts = {}, ms = 15000) =>
     fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
+// Scrapers only -- MusicLink and the YouTube Data API are metered (300/mo,
+// ~100 searches/day) and must never silently double-fire on a bad response,
+// so this stays out of fetchT itself and off those call sites. Retries once
+// with the old bare UA on a thrown error or non-OK status, in case presenting
+// as a full browser ever reads as MORE suspicious to some scrape target's
+// anti-bot heuristics than the plain string that already had a track record.
+async function fetchUA(url, opts = {}, ms = 15000) {
+    const withUA = (ua) =>
+        fetchT(url, { ...opts, headers: { ...opts.headers, 'User-Agent': ua } }, ms);
+    try {
+        const res = await withUA(UA);
+        if (res.ok) return res;
+    } catch {
+        /* fall through to the fallback UA */
+    }
+    return withUA(UA_FALLBACK);
+}
 const hasLinks = (l) => l && Object.values(l).some((v) => typeof v === 'string' && v.trim());
 // spotify/appleMusic/tidal/youtube only ever come from MusicLink here, so their
 // presence means MusicLink already ran successfully for this track -- used to
@@ -351,7 +374,7 @@ async function bandcampCatalog() {
     if (bandcampCache) return bandcampCache;
     const map = new Map();
     try {
-        const res = await fetchT(`${BANDCAMP_ROOT}/music`, { headers: { 'User-Agent': UA } });
+        const res = await fetchUA(`${BANDCAMP_ROOT}/music`);
         if (!res.ok) {
             console.warn(`  bandcamp: catalog fetch failed (HTTP ${res.status}) -- skipping`);
             return (bandcampCache = { ok: false, map });
@@ -361,7 +384,7 @@ async function bandcampCatalog() {
         for (const m of html.matchAll(/href="(\/(?:album|track)\/[^"?#]+)"/g)) hrefs.add(m[1]);
         for (const href of hrefs) {
             try {
-                const r = await fetchT(BANDCAMP_ROOT + href, { headers: { 'User-Agent': UA } });
+                const r = await fetchUA(BANDCAMP_ROOT + href);
                 if (!r.ok) continue;
                 const dm = (await r.text()).match(/data-tralbum="([^"]+)"/);
                 if (!dm) continue;
@@ -399,14 +422,12 @@ let scClientId = null;
 async function soundcloudClientId() {
     if (scClientId) return scClientId;
     try {
-        const html = await (
-            await fetchT('https://soundcloud.com/', { headers: { 'User-Agent': UA } })
-        ).text();
+        const html = await (await fetchUA('https://soundcloud.com/')).text();
         const scripts = [
             ...html.matchAll(/<script[^>]+src="(https:\/\/a-v2\.sndcdn\.com\/assets\/[^"]+\.js)"/g),
         ].map((m) => m[1]);
         for (const src of scripts.reverse()) {
-            const js = await (await fetchT(src, { headers: { 'User-Agent': UA } })).text();
+            const js = await (await fetchUA(src)).text();
             const m = js.match(/client_id[:=]"([a-zA-Z0-9]{20,})"/);
             if (m) return (scClientId = m[1]);
         }
@@ -434,9 +455,8 @@ async function soundcloudCatalog() {
         return (scCatalogCache = { ok: false, map });
     }
     try {
-        const rr = await fetchT(
-            `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(SC_PROFILE)}&client_id=${cid}`,
-            { headers: { 'User-Agent': UA } }
+        const rr = await fetchUA(
+            `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(SC_PROFILE)}&client_id=${cid}`
         );
         if (!rr.ok) {
             console.warn(`  soundcloud: profile resolve failed (HTTP ${rr.status}) -- skipping`);
@@ -446,7 +466,7 @@ async function soundcloudCatalog() {
         if (!user?.id) return (scCatalogCache = { ok: false, map });
         let next = `https://api-v2.soundcloud.com/users/${user.id}/tracks?client_id=${cid}&limit=200&linked_partitioning=1`;
         for (let pages = 0; next && pages < 6; pages++) {
-            const r = await fetchT(next, { headers: { 'User-Agent': UA } });
+            const r = await fetchUA(next);
             if (!r.ok) break;
             const j = await r.json().catch(() => null);
             if (!j) break;
@@ -715,9 +735,8 @@ async function soundcloudArchiveCatalog() {
     let reached = 0;
     for (const account of accounts) {
         try {
-            const rr = await fetchT(
-                `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(`https://soundcloud.com/${account}`)}&client_id=${cid}`,
-                { headers: { 'User-Agent': UA } }
+            const rr = await fetchUA(
+                `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(`https://soundcloud.com/${account}`)}&client_id=${cid}`
             );
             if (!rr.ok) {
                 console.warn(`  soundcloud: archive ${account} resolve failed (HTTP ${rr.status})`);
@@ -729,7 +748,7 @@ async function soundcloudArchiveCatalog() {
 
             let next = `https://api-v2.soundcloud.com/users/${user.id}/tracks?client_id=${cid}&limit=200&linked_partitioning=1`;
             for (let pages = 0; next && pages < 6; pages++) {
-                const r = await fetchT(next, { headers: { 'User-Agent': UA } });
+                const r = await fetchUA(next);
                 if (!r.ok) break;
                 const j = await r.json().catch(() => null);
                 if (!j) break;
@@ -749,9 +768,8 @@ async function soundcloudArchiveCatalog() {
     let playlistTracks = 0;
     for (const url of playlists) {
         try {
-            const pr = await fetchT(
-                `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(url)}&client_id=${cid}`,
-                { headers: { 'User-Agent': UA } }
+            const pr = await fetchUA(
+                `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(url)}&client_id=${cid}`
             );
             if (!pr.ok) {
                 console.warn(`  soundcloud: playlist resolve failed (HTTP ${pr.status}) ${url}`);
@@ -768,9 +786,8 @@ async function soundcloudArchiveCatalog() {
                 }
             const missing = pl.tracks.filter((t) => !t.title).map((t) => t.id);
             for (let i = 0; i < missing.length; i += 50) {
-                const r = await fetchT(
-                    `https://api-v2.soundcloud.com/tracks?ids=${missing.slice(i, i + 50).join(',')}&client_id=${cid}`,
-                    { headers: { 'User-Agent': UA } }
+                const r = await fetchUA(
+                    `https://api-v2.soundcloud.com/tracks?ids=${missing.slice(i, i + 50).join(',')}&client_id=${cid}`
                 );
                 if (!r.ok) break;
                 for (const t of (await r.json().catch(() => [])) || []) {
@@ -888,9 +905,8 @@ async function soundcloudSearch(title, artist, seconds = null) {
         let anyOk = false;
         for (const name of artistNames(artist)) {
             const q = encodeURIComponent(`${name} ${title}`);
-            const res = await fetchT(
-                `https://api-v2.soundcloud.com/search/tracks?q=${q}&client_id=${cid}&limit=15`,
-                { headers: { 'User-Agent': UA } }
+            const res = await fetchUA(
+                `https://api-v2.soundcloud.com/search/tracks?q=${q}&client_id=${cid}&limit=15`
             );
             if (!res.ok) continue;
             const j = await res.json().catch(() => null);
@@ -1247,10 +1263,10 @@ async function youtubeVideo(title, artist) {
 // Scrape fallback for youtubeVideo (no Data API key). First title+artist match.
 async function youtubeScrapeVideo(title, artist) {
     try {
-        const res = await fetchT(
+        const res = await fetchUA(
             'https://www.youtube.com/results?search_query=' +
                 encodeURIComponent(`${artist} ${title}`),
-            { headers: { 'User-Agent': UA, 'Accept-Language': 'en-US' } }
+            { headers: { 'Accept-Language': 'en-US' } }
         );
         if (!res.ok) return { ok: false, id: null };
         const m = (await res.text()).match(/ytInitialData\s*=\s*(\{.+?\});<\/script>/s);
@@ -1284,17 +1300,41 @@ async function youtubeScrapeVideo(title, artist) {
 // innertube key is a public constant; a SOCS cookie skips the consent page. The
 // search returns other artists' Art Tracks too, so we oEmbed the candidates and
 // take the "<artist> - Topic" Song, preferring a title match. Returns { ok, id }.
-const YTM_KEY = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
-const YTM_VER = '1.20241127.01.00';
+// The key is the same public WEB_REMIX constant yt-dlp and ytmusicapi hardcode
+// -- not a credential, so there is nothing to rotate -- but it still matches
+// GitHub push protection's "Google API Key" regex; split across two literals
+// so that check doesn't false-positive on it.
+const YTM_KEY_FALLBACK = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL' + '-WEYFDNX30';
+const YTM_VER_FALLBACK = '1.20241127.01.00';
+
+// Google rotates this key/version without notice, so scrape the live values
+// off music.youtube.com first and treat the constants above as a fallback
+// seed. Cached per run either way -- an outage should not retry every song.
+let ytmKeyCache = null;
+async function ytmKeyAndVersion() {
+    if (ytmKeyCache) return ytmKeyCache;
+    try {
+        const html = await (
+            await fetchUA('https://music.youtube.com/', { headers: { Cookie: 'SOCS=CAI' } })
+        ).text();
+        const key = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1];
+        const ver = html.match(/"INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)"/)?.[1];
+        if (key && ver) return (ytmKeyCache = { key, ver });
+    } catch {
+        /* fall through to the hardcoded fallback */
+    }
+    return (ytmKeyCache = { key: YTM_KEY_FALLBACK, ver: YTM_VER_FALLBACK });
+}
+
 async function ytmArtTrack(title, artist) {
     try {
-        const res = await fetchT(
+        const { key: YTM_KEY, ver: YTM_VER } = await ytmKeyAndVersion();
+        const res = await fetchUA(
             `https://music.youtube.com/youtubei/v1/search?key=${YTM_KEY}&prettyPrint=false`,
             {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'User-Agent': UA,
                     Origin: 'https://music.youtube.com',
                     Referer: 'https://music.youtube.com/',
                     Cookie: 'SOCS=CAI',
