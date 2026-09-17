@@ -7,10 +7,10 @@ import { ERROR_LINES } from '$lib/statics';
 
 export const load: LayoutServerLoad = async ({ fetch, route, params, locals }) => {
     // Reading params.mode registers it as a dependency, so this load re-runs when
-    // the mode changes but NOT when only the date does -- which is what keeps a
-    // date navigation from re-fetching and re-serialising the whole catalog.
-    // On the 404 page there is no matched route and no params, so this falls back
-    // to normal, which is correct: ERROR_LINES only reference normal's titles.
+    // the mode changes but not when only the date does, keeping a date navigation
+    // from re-fetching and re-serialising the whole catalog. On the 404 page
+    // there is no matched route and no params, so this falls back to normal,
+    // which is correct: ERROR_LINES only reference normal's titles.
     const mode = resolveMode(params.mode);
 
     try {

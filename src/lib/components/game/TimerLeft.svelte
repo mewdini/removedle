@@ -23,8 +23,8 @@
 
     // Seconds until the next 21:00 Pacific, as HH:MM:SS. The Pacific arithmetic
     // lives in secondsUntilReset so this agrees with getGameDate by construction
-    // rather than being a second, separately-maintained copy of it -- which is
-    // how this component came to count down to UTC midnight while the game rolled
+    // rather than being a second, separately-maintained copy of it, which is how
+    // this component came to count down to UTC midnight while the game rolled
     // over on Pacific time.
     function format(total: number) {
         const hours = Math.floor(total / 3600);

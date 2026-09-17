@@ -13,17 +13,16 @@
     const albumFile = $derived(albums.find((a: AlbumArt) => a.name === albumName)?.file);
     // Per-mode prefix, not decoration: album names collide across modes (both
     // catalogs have "Teen Week"), so the slug alone would serve the official
-    // cover for a challenger track. Which is also why the override above has to
-    // move the mode and the album map together -- one without the other is how
+    // cover for a challenger track. That is also why the override above has to
+    // move the mode and the album map together: one without the other is how
     // you get the official cover on a leak.
     const src = $derived(albumFile ? artUrl(resolveMode(modeId ?? page.data.mode), albumFile) : '');
 
-    // A cover can be listed in covers.json and still 404 -- `push-data-json`
-    // publishes the manifests but NOT the art, so a scan that adds an album
-    // followed by that push leaves the catalog referencing an object that is not
-    // in the bucket. Without this the browser draws its broken-image icon;
-    // falling back to the same placeholder used for "no art at all" keeps the
-    // layout intact. Reset per src so one failure doesn't poison later covers.
+    // A cover can be listed in covers.json and still 404: `push-data-json`
+    // publishes manifests but not art, so a scan that adds an album followed by
+    // that push leaves the catalog referencing an object not in the bucket.
+    // Falls back to the "no art" placeholder instead of a broken-image icon,
+    // reset per src so one failure doesn't poison later covers.
     let failed = $state(false);
     $effect(() => {
         const _ = src;

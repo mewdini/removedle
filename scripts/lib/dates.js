@@ -1,6 +1,6 @@
 // The game's day rolls over at 21:00 on a Pacific clock, not at midnight and not
 // in UTC. Anything the pipeline stamps or schedules with a date has to agree with
-// that, or CI (UTC) and a local run disagree about which day it is -- a scan at
+// that, or CI (UTC) and a local run disagree about which day it is: a scan at
 // 06:09 UTC is already the next UTC day, and a "new for 14 days" badge stamped on
 // the wrong day flips a day early or late against the client's own reckoning.
 //
@@ -14,7 +14,7 @@ export const RESET_HOUR_PT = 21;
 
 const PACIFIC = 'America/Los_Angeles';
 
-// hourCycle: 'h23' is load-bearing -- `hour12: false` can render midnight as "24"
+// hourCycle: 'h23' is load-bearing: `hour12: false` can render midnight as "24"
 // on some ICU builds, which would roll the day a second time just after midnight.
 const PACIFIC_PARTS = new Intl.DateTimeFormat('en-CA', {
     timeZone: PACIFIC,
@@ -48,7 +48,7 @@ export function addDays(date, days) {
 }
 
 // Which challenge is live right now. For the last three hours of each Pacific
-// calendar day this returns TOMORROW'S date -- that is the point, and it is why
+// calendar day this returns TOMORROW'S date; that is the point, and it is why
 // this is not called todayPacific.
 export function gameDate(now = new Date()) {
     const { date, hour } = pacificParts(now);

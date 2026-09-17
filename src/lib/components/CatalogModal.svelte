@@ -32,11 +32,11 @@
 
     const { revealed, onClose } = $props();
 
-    // The mode being PLAYED, which is not necessarily the one being browsed.
+    // The mode being PLAYED, which is not necessarily the one being browsed
     const pageMode = $derived(resolveMode(page.data.mode));
     // The live game day, which the NEW/UPDATED badge window is measured against.
     // Same reckoning the pipeline stamps addedAt/updatedAt with, so a song
-    // published in the evening is not immediately described as "yesterday".
+    // published in the evening is not immediately described as "yesterday"
     const today = getGameDate();
 
     type SortKey = 'title' | 'album' | 'release' | 'recent';
@@ -47,11 +47,11 @@
     // under the search box. Labels are kept to one short word for that budget.
     //
     // "Updated", not "Newest": there are two different dates on this screen and
-    // "Newest" names neither of them unambiguously -- next to a "Year" pill it
+    // "Newest" names neither of them unambiguously. Next to a "Year" pill it
     // reads as "the newest MUSIC", which is what Year already does. These two
     // sorts genuinely disagree (a 2018 demo added last week is the oldest track
     // and the newest entry), so the labels have to say which date they mean.
-    // Each pill also carries a title attribute spelling it out in full.
+    // Each pill also carries a title attribute spelling it out in full
     const SORTS = [
         ['title', 'A-Z', 'Sort by title'],
         ['album', 'Album', 'Sort by album, then by title within it'],
@@ -67,12 +67,12 @@
 
     // Only the other mode ever lands here; the played mode's catalog is already
     // in page.data. Kept for the life of the page so flipping tabs back and forth
-    // costs one request, not one per tap.
+    // costs one request, not one per tap
     const fetched = new SvelteMap<ModeId, Catalog>();
 
-    // Open on whatever is being played. Keyed on `revealed` alone -- reading
+    // Open on whatever is being played. Keyed on `revealed` alone: reading
     // pageMode untracked, or a mid-session mode switch would yank the tab out
-    // from under someone with the modal already open.
+    // from under someone with the modal already open
     $effect(() => {
         if (!revealed) return;
         untrack(() => {
@@ -105,7 +105,7 @@
             console.error(`Failed to load the ${id} catalog:`, e);
             // Only surface the failure if the player is still looking at the tab
             // that failed, so a tab they already moved away from cannot show an
-            // error over the catalog they are actually reading.
+            // error over the catalog they are actually reading
             if (browsingId === id) loadError = true;
         } finally {
             if (browsingId === id) loading = false;
@@ -128,9 +128,9 @@
     const byTitle = (a: Song, b: Song) =>
         a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
 
-    // Every ordering falls back to title, so rows that tie -- two tracks off the
-    // same album, or two loosies from the same year -- keep a stable, readable
-    // order instead of whatever the input array happened to hold.
+    // Every ordering falls back to title, so rows that tie (two tracks off the
+    // same album, or two loosies from the same year) keep a stable, readable
+    // order instead of whatever the input array happened to hold
     const ordered = $derived(
         [...matches].sort((a, b) => {
             switch (sort) {
@@ -138,7 +138,7 @@
                     // Under challenger's singlesAsOwnAlbum every loosie is its own
                     // one-track "album" named after the track, so this degenerates
                     // to a title sort over there. That is the honest answer for a
-                    // catalog with no albums in it, not a case to special-case.
+                    // catalog with no albums in it, not a case to special-case
                     return (
                         a.album.localeCompare(b.album, undefined, { sensitivity: 'base' }) ||
                         byTitle(a, b)
@@ -147,7 +147,7 @@
                     // Newest release first, matching the direction of "Updated".
                     // Tracks with no date go to the END: an empty sort key would
                     // otherwise lead the list, and 9 blank rows above everything
-                    // reads as a bug rather than as missing metadata.
+                    // reads as a bug rather than as missing metadata
                     const ka = releaseKey(a);
                     const kb = releaseKey(b);
                     if (!ka || !kb) return ka === kb ? byTitle(a, b) : ka ? -1 : 1;
@@ -162,9 +162,9 @@
     );
 
     // The changelist is a shortcut to the top of a list that does not otherwise
-    // surface recent changes -- A-Z, album and release order all scatter them.
+    // surface recent changes: A-Z, album and release order all scatter them.
     // Under "Updated" the list already leads with the same tracks, so repeating
-    // them would only push the catalog down the page.
+    // them would only push the catalog down the page
     const showRecent = $derived(sort !== 'recent' && !query.trim() && flagged.length > 0);
 
     function albumOf(song: Song) {
@@ -179,9 +179,9 @@
      * primary artist, which is almost all of them: this is a game about one
      * artist, so "Jane Remover" on every row is the least informative thing on
      * the screen and it pushes the album and year along. It reappears the moment
-     * a track credits somebody else -- "Jane Remover, Lucy Bedroque" -- which is
+     * a track credits somebody else ("Jane Remover, Lucy Bedroque"), which is
      * the only time the field tells you anything. Compared case-insensitively
-     * and trimmed, so a stray tag variant does not resurrect it on one row.
+     * and trimmed, so a stray tag variant does not resurrect it on one row
      */
     function metaParts(song: Song, album: AlbumArt | undefined, year: string | null) {
         const parts: { key: string; text: string }[] = [];
@@ -225,19 +225,17 @@
                     {@render badge(flag, flagDate(song, flag))}
                 {/if}
             </div>
-            <!-- Built as parts and joined, rather than as inline {#if}s around a
-                 literal separator. Every segment here is optional now -- the
-                 artist is omitted on the ~135 tracks credited solely to the
-                 primary artist, the album on a one-track "album", the year on a
-                 master with no date tag -- and hand-placed separators would
-                 leave a leading "· Teen Week" the moment the first one dropped.
+            <!-- Built as parts and joined, not inline {#if}s around a literal
+                 separator. Every segment is optional (artist on tracks credited
+                 solely to the primary artist, album on a one-track "album", year
+                 on an undated master), and hand-placed separators would leave a
+                 leading "· Teen Week" once the first one dropped.
 
                  Non-breaking spaces around the dot, not plain ones: Svelte trims
-                 whitespace at the start of a block, so a literal space there
-                 disappears and it renders "Jane Remover· Teen Week". They also
-                 keep the dot from wrapping onto a line of its own. The album
-                 keeps its italics, so the parts are rendered rather than joined
-                 into one string. -->
+                 whitespace at the start of a block, so a literal space disappears
+                 and it renders "Jane Remover· Teen Week". They also keep the dot
+                 from wrapping onto its own line. The album keeps its italics, so
+                 parts are rendered rather than joined into one string -->
             <span class="text-[11px] text-theme-muted">
                 {#each metaParts(song, album, year) as part, i (part.key)}
                     {#if i > 0}&nbsp;·&nbsp;{/if}{#if part.key === 'album'}<span class="italic"
@@ -250,7 +248,7 @@
             {/if}
             <!-- Every track that has any link gets them here. This is the whole
                  point of the browser: the catalog is full of leaks and demos
-                 nobody can be expected to recognise from the title alone. -->
+                 nobody can be expected to recognise from the title alone -->
             <div class="mt-0.5">
                 <StreamingLinks links={song.links ?? {}} inGame={false} />
             </div>
@@ -265,7 +263,7 @@
 
             <!-- Client-side tabs rather than the anchors the header's mode
                  toggle uses. Navigating would move a player who only wanted to
-                 look at the other tracklist into the other game. -->
+                 look at the other tracklist into the other game -->
             <nav
                 aria-label="Catalog mode"
                 class="flex flex-row gap-0.5 self-start rounded-full border border-theme-muted p-0.5"
@@ -289,7 +287,7 @@
                  search by it promises something the list cannot give you. The
                  second name on a challenger remix ("Charli XCX - I Finally
                  Understand (remix)") lives in the title. matchesQuery still
-                 checks the artist field anyway -- see the note there. -->
+                 checks the artist field anyway; see the note there -->
             <input
                 type="search"
                 placeholder="Search by title or album"

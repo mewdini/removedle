@@ -15,7 +15,7 @@ type AlbumEntry = {
 export function isFutureChallengeDate(value: string): boolean {
     // Future = after the currently live game day (the game rolls over at 21:00
     // Pacific, so for the last three hours of a Pacific day this is already
-    // tomorrow's date -- see getGameDate). Zero-padded ISO date strings compare
+    // tomorrow's date, see getGameDate). Zero-padded ISO date strings compare
     // lexically in chronological order, and `value` is validated as YYYY-MM-DD by
     // the date param matcher. Mode-independent: every mode unlocks the same day
     // at the same instant.
@@ -56,7 +56,7 @@ export async function loadSongCatalog(fetchFn: typeof fetch, mode: ModeConfig): 
 
 // Streaming links for the track a mode's blurb quotes, so the citation under the
 // tagline offers the same platform buttons the 404 line does. The quotes come
-// from official releases, so challenger -- whose catalog is leaks and demos --
+// from official releases, so challenger (whose catalog is leaks and demos)
 // has to fall back to normal's catalog to find one. Decorative, so a lookup that
 // fails returns no links and the citation renders as plain text.
 export async function loadBlurbLinks(

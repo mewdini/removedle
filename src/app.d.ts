@@ -17,7 +17,7 @@ declare global {
                 DB: D1Database;
                 CHALLENGES: R2Bucket;
             };
-            cf?: IncomingRequestCfProperties; // Add this to the Platform type
+            cf?: IncomingRequestCfProperties;
         }
     }
 }

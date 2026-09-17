@@ -17,7 +17,6 @@
     );
 
     $effect(() => {
-        // only run searcher if current guess and search is non-empty
         if (isCurrentGuess() && searchTerm.trim().length > 0) {
             results = searcher.search(searchTerm).slice(0, 5);
         } else {

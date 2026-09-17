@@ -32,14 +32,14 @@
     const pageDescription = $derived(
         mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurb} ${DESCRIPTION}`
     );
-    // The current page, not the mode root -- and built from page.url rather than
+    // The current page, not the mode root, and built from page.url rather than
     // resolve(), which returns paths relative to the current route ('.',
     // '../challenger') and so cannot be concatenated onto an origin.
     const canonical = $derived(SITE + page.url.pathname);
     // og:image/twitter:image have to be absolute: the Vite import resolves to a
     // root-relative /_app/immutable path, which crawlers are not obliged to
     // resolve against the page. Prefixed with SITE rather than the request
-    // origin for the same reason as canonical -- a preview shared from either
+    // origin for the same reason as canonical: a preview shared from either
     // host then points at the one origin. Not $derived: the import is static.
     const previewImage = SITE + favicon128;
     let settings: AppSettings = $state({
@@ -134,21 +134,20 @@
          convention request. -->
     <link rel="icon" type="image/png" sizes="32x32" href={favicon32} />
     <!-- iOS does not read the web app manifest for home-screen icons, so this
-         tag is the only thing that feeds it and it needs its own file. The one
-         requirement it adds over a favicon is opacity: iOS composites an
-         apple-touch-icon onto black rather than onto the wallpaper, so the
-         artwork's own transparent rounded corners would show as black notches
-         under iOS's (wider) squircle mask. apple-touch-icon-180x180.png is
-         favicon-180x180.png flattened onto the artwork's #FAFAFA background.
-         It stays full-bleed -- unlike the maskable icons below, iOS crops
-         gently and does not need the 80% safe zone. -->
+         tag is the only thing that feeds it, and it needs its own file: iOS
+         composites onto black rather than the wallpaper, so the artwork's
+         transparent rounded corners would show as black notches under its
+         squircle mask. apple-touch-icon-180x180.png is favicon-180x180.png
+         flattened onto the artwork's #FAFAFA background. It stays full-bleed;
+         unlike the maskable icons below, iOS crops gently and doesn't need the
+         80% safe zone. -->
     <link rel="apple-touch-icon" sizes="180x180" href={appleTouchIcon} />
     <link rel="icon" type="image/png" sizes="192x192" href={favicon192} />
     <link rel="icon" type="image/png" sizes="512x512" href={favicon512} />
     <!-- Root-relative and hardcoded rather than resolve()d: resolve() returns
          URLs relative to the current route ('.', '../challenger'), which would
-         make the manifest's own URL -- and therefore the resolution base for
-         start_url and scope -- depend on the page it was linked from. -->
+         make the manifest's own URL, and therefore the resolution base for
+         start_url and scope, depend on the page it was linked from. -->
     <link rel="manifest" href="/manifest.webmanifest" />
 </svelte:head>
 

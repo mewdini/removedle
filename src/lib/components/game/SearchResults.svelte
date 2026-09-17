@@ -2,7 +2,7 @@
     import { fly } from 'svelte/transition';
     import AlbumArt from './AlbumArt.svelte';
     // `open` stays true from the moment the dropdown first appears for a guess
-    // until that guess is answered -- not just while there are results. The outer
+    // until that guess is answered, not just while there are results. The outer
     // element reserves the dropdown's height (`minH`, latched to the tallest the
     // list has been) the whole time, so the page grows only once, when you first
     // start typing. After that, deleting/retyping doesn't change the page height,

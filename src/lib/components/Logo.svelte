@@ -4,20 +4,20 @@
 
     // The wordmark upstream shipped was the word "underscordle" converted to
     // vector outlines, so its letters could not be edited. This renders the site
-    // name as text in Poppins, which the app already loads, and reads the name
-    // from statics so there is one source of truth. Swap back to an inline
-    // <svg> here if a designed wordmark ever replaces it.
+    // name as text instead, reading it from statics so there is one source of
+    // truth. Swap back to an inline <svg> here if a designed wordmark ever
+    // replaces it.
     const { class: className = '' } = $props();
 
     // Resolved server-side from the alias cookie, so the easter egg is already in
     // the SSR'd HTML. Falls back to the plain name when there is no layout data
     // to read, which is the case on the error page. See siteName() in
-    // $lib/statics.
+    // $lib/statics
     const name = $derived(siteName(!!page.data.viaAlias));
 
     // Sized here rather than by the caller, because the size depends on which
     // name is being rendered. Royal2's cap height is 810/1000 units, so 74px
-    // lands the caps on the 60px of the outlined wordmark this replaced -- a
+    // lands the caps on the 60px of the outlined wordmark this replaced, a
     // smaller font-size than Poppins needed (0.72em caps) for the same letters
     // on screen. At 74px the word measures 597px inside a 784px container.
     //
@@ -37,7 +37,7 @@
     // rises 0.81em above its own, so the lines touch outright at 0.92 and 0.95
     // left 1.7px of clearance. Poppins caps have no descender to speak of, so
     // the same 0.95 gave it 0.23em of air; 1.15 buys Royal2 that back. Derive it
-    // again from the ink, not from the em box, if the face ever changes.
+    // again from the ink, not from the em box, if the face ever changes
     const size = $derived(
         name === NAME
             ? 'text-[2.6rem] leading-none sm:text-[4.65rem]'
@@ -48,10 +48,10 @@
 <!-- uppercase is not styling, it is a requirement: Royal2 draws A-Z and nothing
      else, so the untransformed name would render entirely in the fallback serif
      and look like the swap never happened. It only stays safe because both NAME
-     and ALT_NAME are pure letters -- a name with a digit or an apostrophe in it
+     and ALT_NAME are pure letters; a name with a digit or an apostrophe in it
      would come out with invisible holes. See the note in layout.css.
-     No font-bold either -- the face ships a single weight and the browser would
-     synthesise one, which thickens the strokes unevenly. -->
+     No font-bold either: the face ships a single weight and the browser would
+     synthesise one, which thickens the strokes unevenly -->
 <span
     class={`block text-center [font-family:'Royal2',sans-serif] tracking-wide uppercase select-none ${size} ${className}`}
     >{name}</span

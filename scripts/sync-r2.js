@@ -9,8 +9,8 @@ const dirs = modeDirs(mode);
 
 // Every mode shares the same three buckets and is told apart only by its key
 // prefix, so each pull has to exclude the prefixes owned by the other modes.
-// Otherwise their objects land in this mode's local tree and the next push --
-// which overwrites wholesale -- re-uploads them from a stale copy.
+// Otherwise their objects land in this mode's local tree and the next push
+// (which overwrites wholesale) re-uploads them from a stale copy.
 const foreign = otherPrefixes(mode);
 
 async function main() {
@@ -44,8 +44,8 @@ async function main() {
                 await syncPush(dirs.covers, BUCKETS.data, pushPrefix(mode, 'art'));
                 break;
 
-            // Data manifests only (registry, songs/covers json, link-issues) --
-            // NOT album art. For jobs that touch links but not covers (the link
+            // Data manifests only (registry, songs/covers json, link-issues), not
+            // album art. For jobs that touch links but not covers (the link
             // verify cron), so they need no out/covers and never re-push art.
             case 'push-data-json':
                 await syncPush(dirs.data, BUCKETS.data, pushPrefix(mode));

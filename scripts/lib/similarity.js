@@ -9,7 +9,7 @@ import crypto from 'crypto';
 // This exists because it already happened: `call my phone` and
 // `highzoey_-_callmyphone.SugarDaddy` were the same audio at different trims
 // (84,992ms vs 84,704ms) and both had become the answer to a different day
-// before anyone noticed. Nothing else catches it -- the tags differ, the content
+// before anyone noticed. Nothing else catches it: the tags differ, the content
 // hashes differ, and generate-daily's songKey reduces them to `callmyphone` and
 // `highzoeycallmyphonesugardaddy`, so they could even share a single day as two
 // rounds of identical audio.
@@ -58,7 +58,7 @@ async function decodePcm(file) {
     }
 }
 
-/** RMS energy per frame -- robust to re-encoding, unlike the raw waveform. */
+/** RMS energy per frame, robust to re-encoding unlike the raw waveform. */
 export function envelope(pcm) {
     const n = Math.floor(pcm.length / FRAME);
     const out = new Float64Array(n);
@@ -139,7 +139,7 @@ export async function findDuplicates(tracks) {
         try {
             score = similarity(await envFor(a), await envFor(b));
         } catch {
-            continue; // undecodable file -- not this check's problem
+            continue; // undecodable file, not this check's problem
         }
         if (score >= DUPLICATE_THRESHOLD) pairs.push({ a, b, score });
     }

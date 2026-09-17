@@ -1,10 +1,10 @@
 // Report streaming links that need manual attention, read from the registry's
-// PERSISTENT state -- not out/data/link-issues.json, which only reflects the
+// PERSISTENT state, not out/data/link-issues.json, which only reflects the
 // most recent run. Three things are surfaced, per mode:
 //   - deadLinks: links that were live, died, and could not be auto-healed by the
 //     --verify cron (the real "needs a human" list).
 //   - songs with zero healthy links at all (never resolved / fully missed),
-//     EXCLUDING those marked linksOptional -- under the strict link policy a
+//     EXCLUDING those marked linksOptional: under the strict link policy a
 //     leak or unreleased demo that was swept and found nowhere is the expected
 //     outcome, not a problem to nag about every night.
 //   - candidates awaiting review: matches too loose to auto-publish, parked for

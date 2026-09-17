@@ -9,16 +9,16 @@
 //      map, then match every track (no lookup API exists). Mostly the official
 //      ISRC releases, but the loosies are checked against it too.
 //   3. SoundCloud: api-v2 search (client_id scraped from the site) for every
-//      track still missing a soundcloud link -- most tracks live there, and the
+//      track still missing a soundcloud link. Most tracks live there, and the
 //      ones that don't usually have unofficial re-uploads.
 //   4. YouTube is resolved SEPARATELY from YouTube Music: `youtube` is the real
 //      music video (official YouTube Data API, so cron-safe), `youtubeMusic` is
-//      the Art Track -- the "<artist> - Topic" Song, via YT Music's internal
+//      the Art Track (the "<artist> - Topic" Song), via YT Music's internal
 //      search (unofficial, local only). MusicLink co-derives the two (one video
 //      id, both URLs), which is wrong wherever a distinct Art Track exists, so
-//      fixYouTube reconciles them -- co-deriving + flagging entry.coderived only
+//      fixYouTube reconciles them, co-deriving and flagging entry.coderived only
 //      as a last-resort fallback.
-//   Bandcamp/SoundCloud/YouTube-Music scrape, so they are fragile -- see --verify.
+//   Bandcamp/SoundCloud/YouTube-Music scrape, so they are fragile; see --verify.
 //
 // Modes:
 //   pnpm links               LOCAL: fill missing platforms via MusicLink + the
@@ -31,50 +31,35 @@
 //                            publishes without a masters-dependent `pnpm scan`.
 //                            Records hidden links in out/data/link-issues.json.
 //   pnpm links --fix-youtube LOCAL: reconcile youtube (real video) vs youtubeMusic
-//                            (Art Track) across the catalog -- corrects MusicLink's
+//                            (Art Track) across the catalog, correcting MusicLink's
 //                            co-derived pair. Uses YT Music's internal search.
 //   --only=<id,...>          Scope any mode to specific song ids.
-//   --challenge=<date>       Scope to the songs in out/dailies/<date>/meta.json --
+//   --challenge=<date>       Scope to the songs in out/dailies/<date>/meta.json,
 //                            used to verify a day's challenge tracks before publish.
 //
 // Link policy (per mode, see scripts/lib/modes.js):
 //   permissive (normal)   the behaviour described above.
-//   strict (challenger)   the catalog is leaks, demos, remixes and covers. Few
-//                         have official uploads and some are not online at all,
-//                         so a plausible-but-wrong link is worse than no link --
-//                         it spoils the answer on the results screen. Under
-//                         strict, only authoritative sources auto-publish (ISRC
-//                         via MusicLink, the artist's own SoundCloud profile,
-//                         Bandcamp, a title+channel-matched YouTube video). A
-//                         loose match is NEVER written to `links`; it goes to
-//                         entry.needsReview for a human to accept or reject.
-//                         Songs that have been swept and genuinely missed
-//                         everywhere get entry.linksOptional so "no links" stops
-//                         being reported as a problem.
-//                         The ONE co-derivation strict allows is youtubeMusic
-//                         from an ALREADY-ACCEPTED `youtube` link. It is the same
-//                         video id, so it cannot point at a different recording;
-//                         it only opens the vetted video in the YT Music player.
-//                         That is not discovery, so the invariant strict actually
-//                         protects -- never publish a link found by a loose
-//                         search -- is untouched. The id must be sitting in
-//                         entry.links.youtube: co-deriving from a bare
-//                         youtubeMusic that nothing vetted, co-deriving `youtube`
-//                         itself, and inventing an id from a search are all still
-//                         off, and it may only FILL an empty youtubeMusic -- never
-//                         replace a link already there, under either policy. The
-//                         result keeps its entry.coderived flag so a later local
-//                         --fix-youtube can heal it into a real Art Track if one
-//                         ever appears.
+//   strict (challenger)   the catalog is leaks, demos, remixes and covers, so a
+//                         plausible-but-wrong link is worse than no link: it
+//                         spoils the answer on the results screen. Only
+//                         authoritative sources auto-publish (ISRC via
+//                         MusicLink, the artist's own SoundCloud profile,
+//                         Bandcamp, a title+channel-matched YouTube video); a
+//                         loose match goes to entry.needsReview for a human
+//                         instead. The one co-derivation strict allows is
+//                         youtubeMusic from an already-accepted youtube link,
+//                         since it is the same video id and cannot point at a
+//                         different recording; see fixYouTube for the exact
+//                         rules.
 //
 // This script owns ONLY the registry's link fields (links, deadLinks, tried,
 // isrc, coderived, needsReview, rejectedLinks, linksOptional); scan-songs.js owns
 // the master fields. They never write the same keys, so the two can alternate on
-// the shared registry -- provided each starts from a fresh pull-data (pull-data
+// the shared registry, provided each starts from a fresh pull-data (pull-data
 // before a scan or --verify, push after).
 //
 // MUSICLINK_API_KEY + YOUTUBE_API_KEY come from .env (server-side only; never
-// client, never committed). ISRCs are read from the master files in out/masters.
+// client, never committed). ISRCs are read from the master files in out/masters
 
 import 'dotenv/config';
 import fs from 'fs/promises';
@@ -139,12 +124,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the whole batch. Returns a normal Response, or throws on timeout/network.
 const fetchT = (url, opts = {}, ms = 15000) =>
     fetch(url, { ...opts, signal: AbortSignal.timeout(ms) });
-// Scrapers only -- MusicLink and the YouTube Data API are metered (300/mo,
-// ~100 searches/day) and must never silently double-fire on a bad response,
-// so this stays out of fetchT itself and off those call sites. Retries once
-// with the old bare UA on a thrown error or non-OK status, in case presenting
-// as a full browser ever reads as MORE suspicious to some scrape target's
-// anti-bot heuristics than the plain string that already had a track record.
+// Scrapers only: MusicLink and the YouTube Data API are metered and must
+// never double-fire on a bad response, so this stays off those call sites.
+// Retries once with the old bare UA on failure, in case a full browser UA
+// ever reads as more suspicious to some target than the plain string that
+// already had a track record.
 async function fetchUA(url, opts = {}, ms = 15000) {
     const withUA = (ua) =>
         fetchT(url, { ...opts, headers: { ...opts.headers, 'User-Agent': ua } }, ms);
@@ -158,7 +142,7 @@ async function fetchUA(url, opts = {}, ms = 15000) {
 }
 const hasLinks = (l) => l && Object.values(l).some((v) => typeof v === 'string' && v.trim());
 // spotify/appleMusic/tidal/youtube only ever come from MusicLink here, so their
-// presence means MusicLink already ran successfully for this track -- used to
+// presence means MusicLink already ran successfully for this track, used to
 // avoid re-billing the cap regardless of what the scrape adapters have filled.
 const musicLinked = (l) => !!(l.spotify || l.appleMusic || l.tidal || l.youtube);
 
@@ -223,22 +207,18 @@ function dropRejected(entry, links) {
     return kept;
 }
 
-// Run one source; merge any links found. On a genuine miss (ok with no links)
-// stamp entry.tried[source] with today's date. A failed request (ok:false) is
-// left unstamped so it retries on the next run. Ambiguous candidates (strict
-// policy) come back as `review` and are queued rather than published -- they
-// still count as a confirmed miss for the purposes of the dated stamp, so the
-// source is not re-queried until the stamp goes stale.
+// Run one source; merge any links found. A genuine miss (ok with no links)
+// stamps entry.tried[source]; a failed request (ok:false) stays unstamped so
+// it retries next run. Ambiguous candidates (strict policy) come back as
+// `review` and still count as a confirmed miss for the dated stamp.
 async function trySource(entry, source, fn) {
     const { ok, links, review } = await fn();
     const offered = dropRejected(entry, links);
 
-    // FILL ONLY -- never replace a link that is already there. A source can
-    // return several platforms at once (MusicLink returns up to 7), so a call
-    // made to fill a missing `bandcamp` could otherwise silently overwrite a
-    // hand-picked `soundcloud` with whatever the API happened to have. Curated
-    // links are the whole point of the strict policy; nothing automatic may
-    // clobber them.
+    // FILL ONLY: never replace a link already there. A source can return several
+    // platforms at once (MusicLink returns up to 7), so filling a missing
+    // `bandcamp` could otherwise silently overwrite a hand-picked `soundcloud`.
+    // Curated links must never be clobbered automatically.
     const publishable = {};
     for (const [platform, url] of Object.entries(offered)) {
         const existing = entry.links[platform];
@@ -312,11 +292,10 @@ async function musiclinkByIsrc(isrc) {
                 headers: { Authorization: `Bearer ${ML_KEY}` },
             });
         } catch (e) {
-            // A timeout or socket error is a failed REQUEST, not a "no hit". Every
-            // other adapter honours that contract; this one used to let the
-            // exception escape, which aborted main() before it wrote the registry
-            // -- losing the whole run's work (and reddening the cron) because one
-            // API call was slow.
+            // A timeout or socket error is a failed REQUEST, not a "no hit"; every
+            // other adapter honours that contract. This one used to let the
+            // exception escape, aborting main() before it wrote the registry and
+            // losing the whole run's work because one API call was slow.
             console.warn(`  musiclink: request failed for ${isrc} (${e.message})`);
             return { ok: false, links: {} };
         }
@@ -324,11 +303,10 @@ async function musiclinkByIsrc(isrc) {
             await sleep(3000);
             continue;
         }
-        // 404 is this API's authoritative "no such track", not a failure: the
-        // ISRC is simply not in any streaming catalog. Return it as a confirmed
-        // miss so the caller records a dated stamp -- otherwise every run
-        // re-queries the same never-distributed track forever, burning the
-        // 300/mo cap. Unreleased material tagged with an ISRC hits this a lot.
+        // 404 is this API's authoritative "no such track", not a failure. Record
+        // it as a confirmed miss so the caller stamps a dated tried[]; otherwise
+        // every run re-queries the same never-distributed track forever, burning
+        // the 300/mo cap. Unreleased ISRC-tagged material hits this a lot.
         if (res.status === 404) return { ok: true, links: {} };
         if (!res.ok) return { ok: false, links: {} };
 
@@ -439,7 +417,7 @@ async function soundcloudClientId() {
 
 // Catalog-first: sweep Jane Remover's official profile ONCE (resolve -> user id
 // -> paginated tracks) into a title -> track map. Most tracks are official uploads
-// there, so this beats 89 fuzzy searches on both request count and accuracy.
+// there, so this beats a per-track fuzzy search on both request count and accuracy.
 //
 // The map holds a record, not a bare URL, because the runtime is what lets a
 // primary-segment match be corroborated (see carriesPrimarySegment). api-v2 hands
@@ -489,7 +467,7 @@ async function soundcloudCatalog() {
     }
 }
 
-// Re-uploads are titled every which way -- "jane remover - hermit",
+// Re-uploads are titled every which way: "jane remover - hermit",
 // "dltzk(jane remover) - scarecrow". Strip one leading "<something> - " so a
 // title can be compared on its own. Only the first separator is consumed.
 const stripArtistPrefix = (t) => {
@@ -499,12 +477,12 @@ const stripArtistPrefix = (t) => {
 // Both spellings of a title, for matching in either direction.
 const titleKeys = (t) => [...new Set([norm(t), norm(stripArtistPrefix(t))])].filter(Boolean);
 
-// The title up to the first bracket/slash -- "ROBLOXCORE XD LOL!!! (feat. ...)"
+// The title up to the first bracket/slash: "ROBLOXCORE XD LOL!!! (feat. ...)"
 // and "ROBLOXCORE >:) - XD LOL!!! (PROD 4AM) !!" both reduce to "robloxcorexdlol".
 const primarySegment = (t) => String(t || '').split(/\s*[([/]/)[0];
 
 // Keys used to match against the CURATED archive accounts only. Wider than
-// titleKeys because re-uploads decorate titles freely -- different feature
+// titleKeys because re-uploads decorate titles freely: different feature
 // credits, "(PROD X)", emoticons that fake an "artist - title" split. That width
 // is only safe because the account is already vetted and the key must still be
 // >= 6 chars, and every accepted result is confirmed by runtime afterwards.
@@ -517,7 +495,7 @@ const SECONDS_TOLERANCE = 4;
 // A truncated title has to share at least this much with ours before prefix
 // matching will consider it.
 const MIN_PREFIX_KEY = 14;
-// Same words in a different order -- our "Clairo Bags Cover" against an upload
+// Same words in a different order: our "Clairo Bags Cover" against an upload
 // titled "jane remover - bags [clairo cover]". Sorting the tokens makes those
 // compare equal. Only safe because an archive hit is additionally gated on the
 // source being vetted and on the runtime matching.
@@ -544,8 +522,8 @@ function archiveKeys(t) {
     return [...new Set(keys)].filter((k) => k.length >= MIN_ARCHIVE_KEY);
 }
 
-// Does `candidate` plausibly carry `title`? Substring containment is allowed --
-// re-uploads add "(feat. ...)", "[remix]" and so on -- but ONLY once the title is
+// Does `candidate` plausibly carry `title`? Substring containment is allowed
+// (re-uploads add "(feat. ...)", "[remix]" and so on), but only once the title is
 // long enough to be distinctive. A short title inside a longer one is almost
 // always a different song: searching "Help" under the `leroy` alias otherwise
 // matches "Help Yourself to Dub" by Leroy Smart and "People Help The People".
@@ -560,29 +538,19 @@ function titleCarries(candidate, title) {
 }
 
 // The OTHER direction: does `candidate` carry only the FIRST part of a multi-part
-// registry title? titleCarries is deliberately one-way -- it tolerates a
-// candidate that is longer than our title ("(feat. ...)", "[remix]") and never
-// one that is shorter, because a shorter title inside a longer one is usually a
-// different song. But an "A / B" tag is the case where the upload is legitimately
-// the shorter one: our master is tagged "do it again / cigarette" while the
-// artist's own upload is filed as "Do it again", so the correct link was
-// unreachable and a stranger's cover won the slot instead.
+// registry title? An "A / B" tag is the case where the upload is legitimately the
+// shorter form: our master is "do it again / cigarette" but the artist's own
+// upload is filed as "Do it again", so the correct link was unreachable and a
+// stranger's cover won the slot instead.
 //
-// This is the SoundCloud counterpart of the primary-segment retry youtubeVideo
-// already does, but it cannot work the same way. There, the segment shortens the
-// QUERY while acceptance still runs against the full title -- that is what keeps
-// the bare "Cage Girl" single from answering for "Cage Girl / Camgirl". Here the
-// upload's own title IS the short form, so acceptance itself has to give ground,
-// and the safety has to come from somewhere else entirely. Every caller therefore
-// corroborates a segment match before publishing it: the source must be the
-// artist's own profile, AND the runtime must match the master. Runtime is what
-// separates the "Cage Girl" single from the "Cage Girl / Camgirl" track, and on a
-// catalog this full of demos and alternate takes it is the most reliable signal
-// available. A bare segment match from an arbitrary search result is never
-// published.
-//
-// Permissive only. Under strict the segment path is not consulted at all, so
-// nothing about that policy's auto-publish surface changes.
+// Unlike youtubeVideo's primary-segment retry (which shortens the query but still
+// checks the full title), here the upload's title IS the short form, so
+// acceptance has to give ground. The safety comes from corroboration instead: the
+// source must be the artist's own profile AND the runtime must match the master,
+// which is what separates "Cage Girl" the single from "Cage Girl / Camgirl" the
+// track. On a catalog this full of demos and alternate takes, runtime is the most
+// reliable signal available. A bare segment match from an arbitrary search is
+// never published, and strict never consults this path at all.
 const MIN_SEGMENT_TITLE = 6;
 function carriesPrimarySegment(candidate, title) {
     const want = norm(title);
@@ -600,7 +568,7 @@ const artistNames = (artist) => [artist, ...(MODE.artistAliases || [])].filter(B
 //
 // Matched on WORD boundaries, not raw substrings. Several aliases are ordinary
 // names ("leroy", "jamie"), and a substring test credits the artist for any
-// uploader who merely contains them -- "Kevin Le Roy" and "LeRoy - Untitled Long
+// uploader who merely contains them: "Kevin Le Roy" and "LeRoy - Untitled Long
 // Time" both matched the `leroy` alias that way. Tokenising keeps "le roy"
 // distinct from "leroy" while still ignoring punctuation and casing.
 const tokenList = (s) =>
@@ -611,28 +579,21 @@ const tokenList = (s) =>
         .split(' ')
         .filter(Boolean);
 
-// ANTI-CREDIT: the artist's name IS present, and its presence proves the track is
-// by somebody ELSE. "<X> cover" names the artist of the ORIGINAL song, not the
-// performer -- which is exactly how our own catalog uses it ("Round n Round
-// (Selena Gomez cover)" is Jane covering Selena, "Clairo Bags Cover" is Jane
-// covering Clairo). So "do it again / cigarette (jane remover cover)" is somebody
-// covering JANE, and reading that as a credit is what published a stranger's
-// cover as the answer to a real round (registry 463f8047758d, uploader "Bug
-// Eyed", 81.1s against our 82.7s master -- close enough that runtime did not save
-// us either).
+// ANTI-CREDIT: the artist's name being present can prove the track is by somebody
+// ELSE. "<X> cover" names the artist of the ORIGINAL song, not the performer (our
+// own "Round n Round (Selena Gomez cover)" is Jane covering Selena), so "do it
+// again / cigarette (jane remover cover)" is somebody covering JANE. Missing this
+// published a stranger's cover as a real answer (registry 463f8047758d, "Bug
+// Eyed", 81.1s against our 82.7s master; runtime alone wasn't close enough to
+// catch it either).
 //
-// Only the word immediately after the name counts, and only these words:
-//   - "cover" (singular noun) yes: "<X> cover" is always "a cover OF X".
-//   - "covers" (verb) NO: "Jane Remover covers Alex G" is a track BY Jane. Same
-//     five letters, opposite meaning, so the inflection is load-bearing.
-//   - "remix" NO: the convention there is the reverse -- "(leroy remix)" credits
-//     the REMIXER, and this catalog has four of those as real titles. Treating it
-//     as an anti-credit would refuse the artist's own remixes. A remix OF the
-//     artist by someone else is caught by the marker rule below instead, which
-//     routes rather than rejects.
-// The name appearing a second time elsewhere still credits ("jane remover - x
-// (jane remover cover)"), which is deliberate -- that shape is ambiguous, and the
-// marker rule below is what catches it.
+// Only the word right after the name counts, and only "cover" (singular noun):
+// "covers" is a verb ("Jane Remover covers Alex G" is BY Jane, same letters,
+// opposite meaning) and "remix" runs the other way ("(leroy remix)" credits the
+// REMIXER; this catalog has four of those as real titles). A remix OF the artist
+// by someone else is caught by the marker rule below instead. A second mention of
+// the name elsewhere still credits, deliberately: that shape is ambiguous, and
+// the marker rule catches it.
 const ANTI_CREDIT_AFTER = new Set(['cover']);
 
 const creditsArtist = (text, artist) => {
@@ -651,22 +612,17 @@ const creditsArtist = (text, artist) => {
 };
 
 // VERSION MARKERS: words that say a candidate is a different PERFORMANCE of the
-// song rather than the song. The test is ASYMMETRIC -- a marker only counts
-// against a candidate when OUR OWN title does not carry it too. That is what
-// keeps a blanket "reject anything saying cover/remix" from gutting the catalogs:
-// 13 registry titles legitimately carry one of these words (10 in challenger,
-// whose catalog is leaks, demos, remixes and covers, plus three in normal), and
-// for those the word appears on both sides and cancels out.
+// song. The test is ASYMMETRIC: a marker only counts against a candidate when
+// OUR OWN title does not carry it too, so the registry titles that legitimately
+// carry one of these words (mostly in challenger) aren't blanket-rejected.
 //
-// Chosen for being unambiguous about performance rather than about a release:
-// "edit" is skipped (a radio edit is the same recording, trimmed) and so is
-// "live" (it is an ordinary English word that turns up mid-title). Inflections
-// are deliberately not matched -- a "remixes" compilation is a different problem.
+// "edit" and "live" are excluded: an edit is the same recording trimmed, and
+// "live" is too ordinary a word to be reliable. Inflections aren't matched
+// either ("remixes" is a different problem).
 //
-// A mismatch is NOT a rejection. Under the permissive policy the candidate is
-// routed to needsReview instead of links: "there is a marker here we cannot
-// account for" is a good reason to make a human look, and a poor reason to throw
-// away the only link a track has.
+// A mismatch routes to needsReview under permissive rather than rejecting
+// outright: a marker we can't account for is worth a human look, not grounds to
+// throw away the only link a track has.
 const VERSION_MARKERS = new Set([
     'cover',
     'remix',
@@ -691,7 +647,7 @@ function unmatchedMarkers(candidateTitle, ourTitle) {
 // Catalog sweep over the mode's curated archive accounts (see modes.js). Most of
 // the strict catalog was never released, so the artist's own profile does not
 // have it and the only copies are archive re-uploads. Sweeping a hand-picked
-// allowlist -- rather than trusting whatever a search returns -- is what makes
+// allowlist, rather than trusting whatever a search returns, is what makes
 // these safe to publish: the account is vetted, and the title still has to match
 // exactly. Built once per run, like the official-profile and Bandcamp catalogs.
 let scArchiveCache = null;
@@ -815,16 +771,16 @@ async function soundcloudArchiveCatalog() {
 // lists rather than only against whatever SoundCloud returns today.
 //
 // A candidate has to clear three gates, in order:
-//   1. CREDIT. The uploader or the title has to name the artist -- and not as an
+//   1. CREDIT. The uploader or the title has to name the artist, and not as an
 //      anti-credit (see creditsArtist). This is the primary defence: "(jane
 //      remover cover)" stops being a credit at all, so the cover is not merely
 //      demoted, it is dropped before anything else is considered.
-//   2. TITLE. A full match (titleCarries), or -- permissive only -- a
+//   2. TITLE. A full match (titleCarries), or (permissive only) a
 //      primary-segment match, which then has to be corroborated below.
 //   3. CONFIDENCE. An unaccounted version marker, or an uncorroborated segment
 //      match, is real enough to keep but not to publish, so it goes to
 //      needsReview. Under permissive that is a new use of a queue the strict
-//      policy already relies on; the alternative -- discarding it -- would lose
+//      policy already relies on; the alternative, discarding it, would lose
 //      the only lead a linkless track has.
 function scoreSoundcloudCandidates(tracks, title, artist, seconds = null) {
     const publish = [];
@@ -852,7 +808,7 @@ function scoreSoundcloudCandidates(tracks, title, artist, seconds = null) {
             seconds: secs,
             delta,
             // The artist's own profile, tested on the permalink rather than on
-            // the display name -- a fan account can call itself anything.
+            // the display name, since a fan account can call itself anything.
             official: String(url).startsWith(`${SC_PROFILE}/`),
             runtimeOk: delta !== null && delta <= SECONDS_TOLERANCE,
             markers: unmatchedMarkers(t.title, title),
@@ -886,7 +842,7 @@ const toReviewCandidate = (c) => ({
     source: c.why ? `soundcloud-search (${c.why})` : 'soundcloud-search',
 });
 
-// Per-track search for the tail the profile can't cover -- deleted loosies and
+// Per-track search for the tail the profile can't cover: deleted loosies and
 // covers that only survive as re-uploads on other accounts. Strong title match;
 // accept a non-official uploader since the originals are gone.
 //
@@ -968,8 +924,8 @@ async function soundcloudLookup(title, artist, seconds = null) {
         if (hit) return { ok: true, links: { soundcloud: hit.url } };
 
         // Our tag is "A / B" but the artist filed the upload as just "A". The
-        // source is already the strongest one there is -- the artist's own
-        // profile -- so the only thing left to establish is that it is the same
+        // source is already the strongest one there is (the artist's own
+        // profile), so the only thing left to establish is that it is the same
         // recording, which the runtime settles. Both halves are required: an
         // official upload titled with only our first segment could still be a
         // different release (the bare "Cage Girl" single vs "Cage Girl /
@@ -1025,7 +981,7 @@ async function soundcloudLookup(title, artist, seconds = null) {
             }
         }
 
-        // Upload forms truncate long titles -- "Jane Remover - this is how y'all
+        // Upload forms truncate long titles, e.g. "Jane Remover - this is how y'all
         // look with..." for a 91-character track. Exact keys can never match
         // that, so fall back to prefix containment when nothing else hit. Still
         // gated on credit + runtime below, and on a long enough prefix that it
@@ -1069,7 +1025,7 @@ async function soundcloudLookup(title, artist, seconds = null) {
             // Closest runtime wins; an unknown runtime sorts last.
             viable.sort((a, b) => (a.delta ?? 1e9) - (b.delta ?? 1e9));
             // A vetted account and an agreeing runtime still do not tell a cover
-            // from the real thing -- the cover that started all this was 1.6s off
+            // from the real thing: the cover that started all this was 1.6s off
             // our master, well inside tolerance. So a version marker our own title
             // does not carry demotes the candidate to review and lets the next one
             // through, rather than publishing it.
@@ -1112,7 +1068,7 @@ async function soundcloudLookup(title, artist, seconds = null) {
 // --- YouTube + YouTube Music (resolved SEPARATELY) --------------------------
 // `youtube` = the real music video (regular YouTube). `youtubeMusic` = the Art
 // Track: the auto-generated "<artist> - Topic" Song. MusicLink co-derives them
-// (one id, both URLs), which is wrong whenever a distinct Art Track exists -- so
+// (one id, both URLs), which is wrong whenever a distinct Art Track exists, so
 // each is resolved from its own source, and fixYouTube() reconciles the pair.
 const vidId = (u) => {
     const m = u && u.match(/[?&]v=([\w-]+)/);
@@ -1125,12 +1081,12 @@ const isTopic = (ch) => !!ch && / - Topic$/.test(ch);
 // Is this oEmbed record the Art Track for OUR song? Deliberately one function
 // used in two places: ytmArtTrack applies it to a candidate it is about to
 // accept, and fixYouTube applies it to a link that is ALREADY in youtubeMusic.
-// Those two tests must never drift apart -- a link we would not accept today is
+// Those two tests must never drift apart: a link we would not accept today is
 // not one we should keep trusting just because it got there first.
 //
 // A "- Topic" channel alone is not enough, and that is the whole point: an Art
 // Track can be perfectly well formed and still be the wrong song. `what's my age
-// again ?` (97s) held a genuine Art Track whose title was "Video" -- a real Topic
+// again ?` (97s) held a genuine Art Track whose title was "Video", a real Topic
 // upload of something else entirely, 523s long. The channel test passes there;
 // only the title test catches it.
 function isArtTrackFor(info, title, artist) {
@@ -1169,8 +1125,8 @@ async function youtubeVideo(title, artist) {
     if (!YT_KEY) return STRICT ? { ok: false, id: null } : youtubeScrapeVideo(title, artist);
     const review = [];
     // A non-OK response is usually the daily quota (403), not "no such video".
-    // Without this the caller records a dated miss and stops asking for 30 days
-    // -- so one exhausted afternoon silently freezes YouTube resolution.
+    // Without this the caller records a dated miss and stops asking for 30 days,
+    // so one exhausted afternoon silently freezes YouTube resolution.
     let apiFailed = false;
     // One search attempt for a given query string. `lastResort` allows the old
     // "first non-Topic result" fallback; the retry below sets it false so a
@@ -1252,7 +1208,7 @@ async function youtubeVideo(title, artist) {
                 if (id) break;
             }
         }
-        // A failed request is NOT a confirmed "not on YouTube" -- leave it
+        // A failed request is NOT a confirmed "not on YouTube". Leave it
         // unstamped so the next run retries.
         return { ok: !apiFailed, id, review: id ? [] : review };
     } catch {
@@ -1300,8 +1256,8 @@ async function youtubeScrapeVideo(title, artist) {
 // innertube key is a public constant; a SOCS cookie skips the consent page. The
 // search returns other artists' Art Tracks too, so we oEmbed the candidates and
 // take the "<artist> - Topic" Song, preferring a title match. Returns { ok, id }.
-// The key is the same public WEB_REMIX constant yt-dlp and ytmusicapi hardcode
-// -- not a credential, so there is nothing to rotate -- but it still matches
+// The key is the same public WEB_REMIX constant yt-dlp and ytmusicapi hardcode,
+// not a credential, so there is nothing to rotate, but it still matches
 // GitHub push protection's "Google API Key" regex; split across two literals
 // so that check doesn't false-positive on it.
 const YTM_KEY_FALLBACK = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL' + '-WEYFDNX30';
@@ -1309,7 +1265,7 @@ const YTM_VER_FALLBACK = '1.20241127.01.00';
 
 // Google rotates this key/version without notice, so scrape the live values
 // off music.youtube.com first and treat the constants above as a fallback
-// seed. Cached per run either way -- an outage should not retry every song.
+// seed. Cached per run either way, since an outage should not retry every song.
 let ytmKeyCache = null;
 async function ytmKeyAndVersion() {
     if (ytmKeyCache) return ytmKeyCache;
@@ -1382,7 +1338,7 @@ async function ytmArtTrack(title, artist) {
 // `youtubeMusic` is the Art Track. Classifies the ids that are already there via
 // oEmbed, then resolves the missing side from its own source (Data API / YT
 // Music). When the proper distinct link can't be found it CO-DERIVES (same id,
-// other prefix) into an EMPTY slot -- always valid, even from a cron -- and sets
+// other prefix) into an EMPTY slot, always valid even from a cron, and sets
 // entry.coderived[platform] so a later run retries. Returns change tags for
 // logging, plus warnings for the things a human should look at.
 async function fixYouTube(entry) {
@@ -1406,7 +1362,7 @@ async function fixYouTube(entry) {
         const current = entry.links[p];
         // Same video, different URL shape -> keep what is already there. This
         // pass normalises links to a bare watch?v=<id>, which would strip a
-        // deliberate `&t=` timestamp -- and for a track that only exists inside
+        // deliberate `&t=` timestamp, and for a track that only exists inside
         // a DJ set (eat my dust sits at 17:44 of a 20:00 mix under a completely
         // different name) the timestamp is the entire value of the link.
         if (
@@ -1427,7 +1383,7 @@ async function fixYouTube(entry) {
     // The one video id it is safe to co-derive `youtubeMusic` from under the
     // strict policy: one that is ALREADY published as `youtube`, i.e. a human
     // accepted it or a title+channel-matched Data API hit did. Snapshotted BEFORE
-    // the branch below runs, deliberately -- that branch can promote a bare
+    // the branch below runs, deliberately, since that branch can promote a bare
     // youtubeMusic link into the `youtube` slot (curTopic === false), and reading
     // entry.links.youtube afterwards would launder that unvetted id into "accepted".
     let vettedYt = vidId(entry.links.youtube);
@@ -1449,7 +1405,7 @@ async function fixYouTube(entry) {
             unflag('youtube');
             clearReview(entry, ['youtube']);
             // Accepted by youtubeVideo, which under strict demands an exact title
-            // AND the artist's own channel -- so it is vetted enough to co-derive
+            // AND the artist's own channel, so it is vetted enough to co-derive
             // the YT Music URL from below.
             vettedYt = v.id;
         } else if (v.review?.length) {
@@ -1462,17 +1418,15 @@ async function fixYouTube(entry) {
 
     // What is sitting in youtubeMusic right now, if anything.
     //
-    // `cur` prefers the youtube id, so an existing youtubeMusic that points at a
-    // DIFFERENT video is invisible to the classification above -- curTopic
-    // describes the youtube video, not this one. That blind spot is what let a
-    // co-derived duplicate overwrite a real Art Track on `what's my age again ?`.
-    // Classify it on its own so the pass can actually see it.
+    // `cur` prefers the youtube id, so an existing youtubeMusic pointing at a
+    // DIFFERENT video is invisible to the classification above; that blind spot
+    // let a co-derived duplicate overwrite a real Art Track on `what's my age
+    // again ?`. Classify it separately so the pass can actually see it.
     //
-    // Cost: one extra oEmbed, only for entries that have a distinct pair (on
-    // normal that is all 89). oEmbed is free, keyless and unmetered, and the pass
-    // already spends one per entry plus up to ten inside ytmArtTrack -- so where
-    // the held link IS the Art Track this is a net SAVING, replacing a YT Music
-    // search and its candidate oEmbeds with a single call.
+    // Costs one extra oEmbed (free, keyless, unmetered) only for entries with a
+    // distinct pair. Where the held link IS the Art Track, this nets out as a
+    // saving: it replaces a full YT Music search and its candidate oEmbeds with a
+    // single call.
     const heldYtm = entry.links.youtubeMusic;
     const heldOccupied = typeof heldYtm === 'string' && heldYtm.trim() !== '';
     const heldId = vidId(heldYtm);
@@ -1509,27 +1463,20 @@ async function fixYouTube(entry) {
             set('youtubeMusic', ytmUrl(a.id), `ytmusic=${a.id}`);
             unflag('youtubeMusic');
         } else {
-            // No distinct Art Track exists (or could be reached), so fall back to
-            // the same video id under the YT Music player. This is a re-pointing,
-            // not a discovery: the id is one we already publish, so it cannot
-            // resolve to a different recording -- which is why strict allows it
-            // even though strict forbids everything a search turned up. Strict
-            // takes the id ONLY from `vettedYt`; permissive keeps its historical
-            // `|| cur` fallback, which may come from a bare youtubeMusic link.
+            // No distinct Art Track exists, so fall back to the same video id under
+            // the YT Music player. This is a re-pointing, not a discovery, so
+            // strict allows it even though it forbids everything a search turned
+            // up. Strict takes the id ONLY from `vettedYt`; permissive keeps its
+            // historical `|| cur` fallback.
             const yid = STRICT ? vettedYt : vidId(entry.links.youtube) || cur;
-            // FILL ONLY. Co-derivation may occupy an EMPTY slot; it may never
-            // replace a link that is already there. Whatever is there was either
-            // curated by hand or resolved by a real Art Track lookup, and a
-            // co-derived duplicate of the youtube link is strictly less
-            // informative than either -- it adds no destination the results screen
-            // does not already offer. This is the same rule trySource enforces for
-            // every other source, and it applies under BOTH policies: normal has
-            // 89 distinct youtube/youtubeMusic pairs and this path would have
-            // flattened them just as readily.
-            //
-            // The one thing it cannot do is tell a wrong-but-well-formed link from
-            // a right one, so it is paired with the warning above rather than
-            // being silent: keeping a bad link unreported is its own failure.
+            // FILL ONLY, same rule as trySource: never replace a link already
+            // there, since it was either curated by hand or a real Art Track
+            // lookup, and a co-derived duplicate of the youtube link adds no
+            // destination the results screen doesn't already offer. Applies under
+            // both policies; normal's distinct youtube/youtubeMusic pairs would
+            // otherwise flatten just as readily. Can't tell a wrong-but-well-formed
+            // link from a right one, so it's paired with the warning above rather
+            // than staying silent.
             if (yid && heldOccupied && heldId !== yid) {
                 warnings.push(
                     `kept existing youtubeMusic (${heldYtm}) -- no Art Track found, ` +
@@ -1621,12 +1568,12 @@ async function main() {
                 n++;
                 console.log(`  ~ ${entry.title}: ${changes.join(', ')}`);
             }
-            // Deliberately console output rather than entry.needsReview. That
+            // Deliberately console output rather than entry.needsReview: that
             // queue holds candidate URLs for a human to accept, and accepting
-            // moves the url INTO links -- so queueing the co-derived duplicate we
-            // just declined to write would offer a one-keystroke path to the very
-            // overwrite this guard exists to prevent. recordReview would refuse it
-            // anyway: it skips any platform that already holds a link.
+            // moves the url INTO links, so queueing the co-derived duplicate would
+            // offer a one-keystroke path to the very overwrite this guard
+            // prevents. recordReview would refuse it anyway, since it skips any
+            // platform that already holds a link.
             for (const w of warnings || []) {
                 kept++;
                 console.log(`  ! ${entry.title}: ${w}`);
@@ -1653,7 +1600,7 @@ async function main() {
         const isrc = await readIsrc(entry);
 
         // One MusicLink lookup per song, memoized (healing and resolution share
-        // it) so a song never costs more than a single call -- keeps the 300/mo
+        // it) so a song never costs more than a single call, keeping the 300/mo
         // cap safe in an unattended cron.
         let mlMemo;
         const mlLookup = async () => {
@@ -1665,10 +1612,10 @@ async function main() {
 
         // --verify is the lean cron: HEAD-check each live link; try to heal dead
         // ones via MusicLink ONLY (scraping stays local); and HIDE any that can't
-        // be healed by moving them to entry.deadLinks -- out of entry.links (so
-        // the catalog and client never render them) and marked heal-attempted so
-        // the cron won't retry them. A later local `pnpm links` can still recover
-        // one with the scrapers. No scraping, no discovery in this mode.
+        // be healed by moving them to entry.deadLinks, out of entry.links (so the
+        // catalog and client never render them) and marked heal-attempted so the
+        // cron won't retry them. A later local `pnpm links` can still recover one
+        // with the scrapers. No scraping, no discovery in this mode.
         if (VERIFY) {
             // Collect every dead link first, so the MusicLink lookup is done ONCE
             // per song (the API is per-track): a track with several dead links
@@ -1689,20 +1636,18 @@ async function main() {
                 for (const [platform, url] of dead) {
                     let candidate = mlLinks[platform] || null;
                     let coderive = false;
-                    // Strict: heal from MusicLink (ISRC) only. A SEARCH-based
-                    // replacement is a guess, and silently swapping in a guess is
-                    // worse than showing nothing -- so anything that cannot be
-                    // healed authoritatively is hidden below. youtubeMusic is the
-                    // exception both policies share: it co-derives from the
-                    // (already-healed, still-live) `youtube` link, which is an id
-                    // we already publish rather than anything newly discovered,
-                    // so it cannot point at a different recording. If `youtube`
-                    // was itself dead and got hidden above, entry.links.youtube is
-                    // gone, no id is available, and youtubeMusic is hidden too.
+                    // Strict: heal from MusicLink (ISRC) only. A search-based
+                    // replacement is a guess, and swapping one in silently is worse
+                    // than showing nothing, so anything that can't be healed
+                    // authoritatively is hidden below. youtubeMusic co-derives from
+                    // the (already-healed, still-live) `youtube` link under both
+                    // policies, since that id is already published and can't point
+                    // elsewhere; if `youtube` was itself dead and hidden above,
+                    // youtubeMusic is hidden too.
                     if (STRICT && platform !== 'youtubeMusic') {
                         // no search-based healing
                     } else if (platform === 'youtube' && YT_KEY) {
-                        // real video via the Data API -- official, so cron-safe
+                        // real video via the Data API: official, so cron-safe
                         const v = await youtubeVideo(entry.title, entry.artist);
                         if (v.id) candidate = ytUrl(v.id);
                     } else if (platform === 'youtubeMusic') {
@@ -1786,7 +1731,7 @@ async function main() {
                     entry.tried = entry.tried || {};
                     entry.tried.youtube = today();
                 }
-                // else: the lookup itself failed (quota/network) -- leave it
+                // else: the lookup itself failed (quota/network). Leave it
                 // unstamped so the next run asks again instead of writing off
                 // the track for STALE_DAYS.
                 await sleep(500);
@@ -1797,7 +1742,7 @@ async function main() {
                 console.log(`  + ${entry.title}: ${Object.keys(entry.links).join(', ')}`);
             } else if (!hasLinks(entry.links) && !(STRICT && !isrc)) {
                 // Under strict, a track with no ISRC and no hits is the expected
-                // outcome, not an issue -- it is marked linksOptional below.
+                // outcome, not an issue: it is marked linksOptional below.
                 issues.push({
                     id,
                     title: entry.title,
@@ -1819,8 +1764,8 @@ async function main() {
             }
         }
 
-        // A platform a local re-scrape just recovered is no longer dead -- drop
-        // its deadLinks record so it stops being marked heal-attempted.
+        // A platform a local re-scrape just recovered is no longer dead: drop its
+        // deadLinks record so it stops being marked heal-attempted.
         if (entry.deadLinks) {
             for (const p of Object.keys(entry.deadLinks)) {
                 if (entry.links[p]) delete entry.deadLinks[p];
@@ -1831,18 +1776,16 @@ async function main() {
         // A platform that now has a link no longer needs triage.
         if (entry.needsReview) clearReview(entry, Object.keys(entry.links));
 
-        // "Zero links is expected here." Set once every APPLICABLE source has been
-        // asked and confirmed it has nothing (a dated stamp means a real answer;
-        // a failed request leaves no stamp, so a flaky run can never silence a
-        // track). link-issues.js then stops reporting it, which is what keeps the
-        // rolling link-health issue from permanently listing 40-odd unreleased
-        // tracks that were never online to begin with.
+        // "Zero links is expected here." Set once every APPLICABLE source has
+        // confirmed it has nothing (a dated stamp means a real answer; a failed
+        // request leaves no stamp, so a flaky run can't silence a track). This
+        // keeps the rolling link-health issue from permanently listing 40-odd
+        // tracks that were never online.
         //
-        // Deliberately per-entry rather than per-mode: a track whose sources have
-        // NOT all answered still gets flagged, and a track that had links and lost
-        // them produces deadLinks, which are reported regardless of this marker.
-        // Stamps expire after STALE_DAYS, so every source is re-asked periodically
-        // and the flag clears the moment something turns up.
+        // Per-entry rather than per-mode: a track whose sources haven't all
+        // answered still gets flagged, and a track that had links and lost them
+        // still produces deadLinks regardless of this marker. Stamps expire after
+        // STALE_DAYS, so the flag clears the moment something turns up.
         if (STRICT) {
             const sources = ['bandcamp', 'soundcloud', 'youtube'];
             if (isrc) sources.push('musiclink');

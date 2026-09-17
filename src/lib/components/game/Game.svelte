@@ -37,7 +37,7 @@
     const player = createSharedSnippetPlayer();
     const isToday = $derived(date === getGameDate());
     // Set only by the undated route, which always renders whatever day is live.
-    // The dated route's date is pinned by the URL and must never self-refresh.
+    // The dated route's date is pinned by the URL and must never self-refresh
     const live = $derived(!!data.live);
 
     const searcher = $derived(
@@ -92,7 +92,7 @@
         // (/2026-07-26 -> /challenger/2026-07-26) keeps the same route and the
         // same date, so keying on `date` alone would leave this effect dormant:
         // the previous mode's gameState would survive and the persist effect
-        // below would immediately write it under the new mode's storage key.
+        // below would immediately write it under the new mode's storage key
         const activeMode = mode;
 
         loading = true;
@@ -110,8 +110,8 @@
             // assigns when there is something saved, so without this a mode with
             // no stats yet (the first visit to a new mode) would keep the PREVIOUS
             // mode's streak in memory and the persist effect would immediately
-            // write it under the new mode's key -- inheriting a best streak the
-            // player never earned in that game.
+            // write it under the new mode's key, inheriting a best streak the
+            // player never earned in that game
             stats.currentStreak = 0;
             stats.bestStreak = 0;
             stats.lastChallengeCompletedDate = '';
@@ -194,7 +194,7 @@
         loading = false;
     });
 
-    // save everytime theres a change to game state
+    // save every time there's a change to game state
     $effect(() => {
         const stateToSave = JSON.stringify(gameState);
         if (!loading && date) {
@@ -202,7 +202,7 @@
         }
     });
 
-    // save every time there changes to the stats
+    // save every time the stats change
     $effect(() => {
         const statsToSave = JSON.stringify(stats);
         if (!loading) {
@@ -261,7 +261,7 @@
 
     // A board is "in progress" once a guess has been made and while any round is
     // still playable. An untouched board has nothing to lose, and a finished one
-    // has already been saved to D1 and stays readable at its dated URL.
+    // has already been saved to D1 and stays readable at its dated URL
     const inProgress = $derived(
         gameState.roundGuesses.some((round) => round.length > 0) &&
             gameState.roundStatuses.some((status) => status === 'playing')
@@ -274,20 +274,20 @@
     //
     // Refreshes only the day-scoped dependency, not invalidateAll(): the layout
     // load keys on params.mode, so invalidating everything would re-fetch and
-    // re-serialise the whole song catalog just to move the date on.
+    // re-serialise the whole song catalog just to move the date on
     $effect(() => {
         if (!live || loading) return;
 
         function check() {
             // `date` null means the live day has no challenge at all. Refreshing
-            // on that would spin every 30s, since there is no date to compare.
+            // on that would spin every 30s, since there is no date to compare
             if (!date || inProgress) return;
             if (getGameDate() !== date) invalidate('app:day');
         }
 
         const poll = setInterval(check, 30_000);
         // A backgrounded tab has its timers throttled hard, so re-check the
-        // moment it comes back rather than waiting out the next tick.
+        // moment it comes back rather than waiting out the next tick
         document.addEventListener('visibilitychange', check);
 
         return () => {
@@ -323,7 +323,7 @@
 
         // Claim the save before awaiting so a second in-flight fire (e.g. another
         // open tab, or this effect re-running) sees hasSaved and bails. Released
-        // on failure so a genuine error can still be retried.
+        // on failure so a genuine error can still be retried
         gameState.hasSaved = true;
         try {
             const formData = new FormData();
@@ -340,7 +340,7 @@
             if (response.ok) {
                 // Refresh only the stats read (see `depends('app:stats')`), not the
                 // whole page: invalidateAll() would re-run the layout load and re-send
-                // the entire song catalog just to update two aggregate integers.
+                // the entire song catalog just to update two aggregate integers
                 await invalidate('app:stats');
             } else {
                 gameState.hasSaved = false;

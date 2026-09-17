@@ -1,7 +1,7 @@
 // Triage the link candidates that resolve-links.js parked on entry.needsReview.
 //
 // Under the strict link policy (see scripts/lib/modes.js) a match that is not
-// authoritative is never published -- a confident-looking wrong link spoils the
+// authoritative is never published: a confident-looking wrong link spoils the
 // answer on the results screen. Those matches land in entry.needsReview instead,
 // and this is the tool that turns them into a decision:
 //
@@ -58,7 +58,7 @@ function stripArtistPrefix(title) {
 }
 
 // An account that exists to archive THIS artist. Requires "jane remover", or
-// both "jane" and "archive" -- so "Jane Remover archive" and "jane archive"
+// both "jane" and "archive", so "Jane Remover archive" and "jane archive"
 // qualify while "isaac (archived)" and "Ballslave02" do not.
 function isArchiveAccount(uploader) {
     const u = norm(uploader);
@@ -79,8 +79,8 @@ function titleMatchesExactly(entryTitle, candidate) {
 // Corroboration by behaviour rather than by name: build uploader -> set of
 // DISTINCT songs for which they turned up with an exact title match. An account
 // carrying several different Jane Remover tracks is an archive/fan account
-// whatever it happens to be called, while a one-off match from a stranger --
-// the case that produces a completely unrelated video -- scores 1 and is left
+// whatever it happens to be called, while a one-off match from a stranger
+// (the case that produces a completely unrelated video) scores 1 and is left
 // for a human. This costs no network calls; it is derived from the candidate
 // pool the resolver already collected across the whole catalog.
 function buildUploaderCredit(registry) {

@@ -41,7 +41,6 @@ async function bootstrap() {
 
         console.log(`Bootstrapping ${MODE.id} registry from: ${MASTERS_DIR}`);
 
-        // check if out/data exists
         await fs.mkdir(path.dirname(REGISTRY_FILE), { recursive: true });
 
         const files = await fs.readdir(MASTERS_DIR);

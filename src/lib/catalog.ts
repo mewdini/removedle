@@ -4,7 +4,7 @@ import { calculateDays } from '$params/date';
 
 // How long a track keeps its badge. Long enough that someone who plays a couple
 // of times a week still sees what changed, short enough that the "Recent"
-// section stays a changelist rather than a second copy of the catalog.
+// section stays a changelist rather than a second copy of the catalog
 export const RECENT_WINDOW_DAYS = 14;
 
 export type CatalogFlag = 'new' | 'updated';
@@ -23,13 +23,13 @@ function isRecent(date: string | undefined, today: string): boolean {
     const age = daysBetween(date, today);
     // Guard the upper bound only on the past side. A stamp in the future can
     // only come from a clock skew between the scanning machine and the player's
-    // Pacific "today", and treating it as recent is the harmless reading.
+    // Pacific "today", and treating it as recent is the harmless reading
     return age <= RECENT_WINDOW_DAYS;
 }
 
 /**
  * Badge for a track, or null. A track added on the mode's start date is part of
- * the launch catalog and never counts as new -- otherwise every song would be
+ * the launch catalog and never counts as new: otherwise every song would be
  * badged for the game's first two weeks, which tells a player nothing.
  *
  * `new` outranks `updated`: a track added and then retitled inside the same
@@ -57,8 +57,8 @@ export function describeAge(date: string, today: string): string {
 
 /**
  * The most recent thing that happened to a track, for the "Updated" ordering.
- * Sorts on both stamps rather than just `addedAt`, or a retitle -- half the
- * point of the changelist -- would never move a track up the list.
+ * Sorts on both stamps rather than just `addedAt`, or a retitle (half the
+ * point of the changelist) would never move a track up the list.
  */
 export function lastTouched(song: Song): string {
     const dates = [song.addedAt, song.updatedAt].filter(Boolean) as string[];
@@ -70,7 +70,7 @@ export function lastTouched(song: Song): string {
  *
  * The field keeps the tag's own precision, and a plain string compare would rank
  * a bare "2023" ahead of every dated day in 2023 purely for being the shorter
- * string -- so "2023" would land in the wrong half of its own year. Padding the
+ * string, so "2023" would land in the wrong half of its own year. Padding the
  * missing components with `-00` pins an imprecise date to the start of its year,
  * which is the conventional reading and, more to the point, is deterministic.
  */
@@ -103,7 +103,7 @@ export function describeChange(song: Song): string | null {
  *
  * The artist field is matched but NOT advertised in the placeholder. This is a
  * game about one artist, so "search by artist" promises something the catalog
- * cannot deliver -- every normal-mode row is "Jane Remover", and the second name
+ * cannot deliver: every normal-mode row is "Jane Remover", and the second name
  * on a challenger remix ("Charli XCX - I Finally Understand (remix)") lives in
  * the TITLE, not here. Keeping the clause costs nothing and quietly helps anyone
  * who types a name anyway.

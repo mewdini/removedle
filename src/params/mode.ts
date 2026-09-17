@@ -1,6 +1,6 @@
 import type { ParamMatcher } from '@sveltejs/kit';
 
-// Only the non-default modes have a URL segment -- `normal` is the bare /, /<date>
+// Only the non-default modes have a URL segment: `normal` is the bare /, /<date>
 // and /archive, so it is matched by the optional param being absent.
 //
 // Hardcoded rather than derived from $lib/modes: a param matcher has to be

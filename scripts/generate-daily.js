@@ -24,7 +24,7 @@ const DEDUPLICATE_DAYS = 5;
 const MAX_PER_ALBUM = 2;
 // Fallback for a bare `pnpm generate`. The live game day, not the UTC day: the
 // two differ for most of the evening, and picking the wrong one here does not
-// fail loudly -- the date is the PRNG seed, so it would quietly produce a
+// fail loudly. The date is the PRNG seed, so it would quietly produce a
 // different but entirely valid-looking challenge under the wrong filename.
 const TODAY_DATE = gameDate();
 
@@ -33,7 +33,7 @@ const TODAY_DATE = gameDate();
 // `songs.json` is the catalog: it is what the game loads, what the fuzzy search
 // autocompletes, what the results screen resolves an answer's title from, and
 // what the catalog browser lists. The REGISTRY is a superset of it, because
-// scan-songs.js never removes an entry -- retiring a master (moving it to
+// scan-songs.js never removes an entry: retiring a master (moving it to
 // masters/_excluded/) drops it from songs.json but leaves its registry row
 // behind forever.
 //
@@ -44,7 +44,7 @@ const TODAY_DATE = gameDate();
 //
 // Checking that the master file exists is NOT sufficient. `push-masters` only
 // ever uploads, so a retired master stays in the music bucket and CI's
-// `pull-masters` brings it back -- the file is present on the runner even though
+// `pull-masters` brings it back: the file is present on the runner even though
 // it is gone locally and absent from the catalog.
 //
 // A missing or unreadable songs.json throws rather than falling back to the whole
@@ -112,12 +112,12 @@ async function getMeanVolume(masterPath, startTime, duration) {
 
 // Purely relative string math: "the five labels before this label". It never
 // asks what day it is now, so the reset hour does not enter into it. The UTC
-// pinning is only to keep the arithmetic on clean date strings. Using the
-// local-time accessors instead is correct for fixed
-// offsets but silently wrong across a DST transition: the changing offset shifts
-// the computed instant by an hour, which can step over a UTC midnight. On a
-// machine in a DST-observing zone, generating 2026-11-03 skipped 2026-11-01 and
-// reached back to 2026-10-28, checking the wrong five days for repeats.
+// pinning is only to keep the arithmetic on clean date strings; the local-time
+// accessors are correct for a fixed offset but silently wrong across a DST
+// transition, since the changing offset shifts the computed instant by an hour
+// and can step over a UTC midnight. On a machine in a DST-observing zone,
+// generating 2026-11-03 skipped 2026-11-01 and reached back to 2026-10-28,
+// checking the wrong five days for repeats.
 function getPreviousDays(dateArg) {
     const dates = [];
 
@@ -336,7 +336,7 @@ async function generateDaily() {
                         // no stdin, so without this a regeneration of a date whose
                         // snippet files already exist silently keeps the OLD audio
                         // (ffmpeg reads EOF at the overwrite prompt and skips the
-                        // write) while meta.json updates -- new answers, stale audio.
+                        // write) while meta.json updates: new answers, stale audio.
                         '-y',
                         '-i',
                         masterPath,

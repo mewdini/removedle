@@ -110,10 +110,9 @@ export async function listObjects(bucket, prefix = '') {
 }
 
 // `exclude` is a list of key prefixes to skip. Modes share buckets and are told
-// apart only by their key prefix, so a mode pulling from the bucket root MUST
-// exclude every other mode's prefix. Without that, the other mode's objects land
-// in this mode's local tree and the next (wholesale-overwrite) push re-uploads
-// them from a stale copy, silently reverting whatever wrote them last.
+// apart only by key prefix, so a mode pulling from the bucket root must exclude
+// every other mode's prefix, or their objects land in this mode's local tree and
+// the next wholesale-overwrite push reverts whatever wrote them last.
 export async function syncPull(bucket, prefix, localDir, exclude = []) {
     const excludePrefixes = (Array.isArray(exclude) ? exclude : [exclude]).filter(Boolean);
 

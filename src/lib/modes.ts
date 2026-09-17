@@ -3,7 +3,7 @@ import { ASSETS_URL, CHALLENGES_URL } from '$lib/statics';
 // Game modes. Each one is a completely separate game: its own catalog, its own
 // daily challenges, its own community stats and its own saved progress.
 //
-// The mode lives in the URL and is the source of truth -- `normal` has no URL
+// The mode lives in the URL and is the source of truth: `normal` has no URL
 // segment, so its links, R2 keys, localStorage keys and PRNG seed are exactly
 // what they always were. The header toggle is just navigation.
 //
@@ -29,7 +29,7 @@ export interface ModeConfig {
     /**
      * The artist every track in this mode is by. The catalog browser omits the
      * artist line when it matches, because this is a game about ONE artist and
-     * repeating their name on all 89 rows is noise that crowds out the album and
+     * repeating their name on every row is noise that crowds out the album and
      * year. It renders only when a track credits somebody else too, which is the
      * only case where the field carries information.
      */

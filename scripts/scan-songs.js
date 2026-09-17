@@ -18,9 +18,9 @@ const DIRS = modeDirs(MODE);
 const MASTERS_DIR = DIRS.masters;
 // The RAW tagged sources (masters/), not the converted out/masters/*.m4a this
 // script otherwise walks. ffmpeg drops tags on FLAC -> m4a, so a few fields can
-// only be read here -- see resolveReleaseDate, and readIsrc in resolve-links.js
-// for the same trick. Local only: `push-masters` uploads out/masters, never
-// these, so on CI this directory does not exist at all.
+// only be read here (see resolveReleaseDate, and readIsrc in resolve-links.js
+// for the same trick). Local only: `push-masters` uploads out/masters, never
+// these, so on CI this directory does not exist at all
 const SRC_MASTERS_DIR = DIRS.srcMasters;
 const DATA_DIR = DIRS.data;
 const COVER_DIR = DIRS.covers;
@@ -36,7 +36,7 @@ const SUPPORTED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg'];
 // The live game day, not the calendar day. The catalog browser measures its
 // "new for 14 days" window by comparing these stamps against the same reckoning
 // on the client, so a scan published after 21:00 PT has to agree with the day the
-// player is being shown or the badge reads as a day old the moment it appears.
+// player is being shown or the badge reads as a day old the moment it appears
 const TODAY = gameDate();
 
 // Provenance for the in-game catalog browser, which badges recent arrivals and
@@ -53,15 +53,15 @@ const TODAY = gameDate();
 //
 // Only TITLE and ALBUM changes count as an update. Both are player-visible (the
 // title is literally the answer they type, the album picks the cover art), and
-// both are rare and deliberate -- the `untitled` -> `BEGGIN ON YOUR KNEES` fix
+// both are rare and deliberate: the `untitled` -> `BEGGIN ON YOUR KNEES` fix
 // is exactly the case worth surfacing. contentHash changes are excluded on
 // purpose: a re-tag or re-encode moves the hash without changing anything a
 // player can see, and those happen often enough to drown the list.
 //
 // Returns the fields to persist SEPARATELY from whether the change happened on
-// this run, because `previousTitle` is carried forward forever once set --
+// this run, because `previousTitle` is carried forward forever once set;
 // reading it back as "a retitle just happened" would re-announce the same edit
-// in the scan log on every run from now on.
+// in the scan log on every run from now on
 function trackProvenance(existingEntry, title, albumName) {
     if (!existingEntry) {
         return { fields: { addedAt: TODAY }, retitled: false, rebadged: false };
@@ -73,7 +73,7 @@ function trackProvenance(existingEntry, title, albumName) {
 
     // A change record replaces the previous one wholesale rather than merging,
     // so `previousAlbum` never lingers next to a later title-only edit and
-    // describes a change that is two revisions old.
+    // describes a change that is two revisions old
     if (retitled || rebadged) {
         return {
             fields: {
@@ -103,17 +103,17 @@ function trackProvenance(existingEntry, title, albumName) {
 //
 // The source masters tag collaborations properly, as a MULTI-VALUE Vorbis ARTIST
 // field (["Jane Remover", "Lucy Bedroque"]). ffmpeg cannot represent that in m4a,
-// so converting flattens it to a single semicolon-joined string -- and since this
+// so converting flattens it to a single semicolon-joined string, and since this
 // script reads out/masters/*.m4a, that flattened form is what reached the catalog:
 // two tracks rendered "Jane Remover;Lucy Bedroque" and "Jane Remover;Tinashe" in
 // the browser. Same family as the ISRC and originaldate losses noted above; the
 // tags are not wrong, the conversion is lossy.
 //
 // Deliberately normalised here rather than read back from the source master. The
-// source array is not ordered the way the credit reads -- "Nasty (Match My Tweak)"
-// tags ["Tinashe", "Jane Remover"], which would credit Tinashe first -- whereas the
+// source array is not ordered the way the credit reads: "Nasty (Match My Tweak)"
+// tags ["Tinashe", "Jane Remover"], which would credit Tinashe first, whereas the
 // flattened m4a preserves the intended order. Normalising also keeps working on a
-// CI runner, which pulls only out/masters and has no source files at all.
+// CI runner, which pulls only out/masters and has no source files at all
 function normalizeArtist(value) {
     return (
         String(value)
@@ -126,23 +126,24 @@ function normalizeArtist(value) {
 
 // When the recording came out, for the catalog browser's release-date sort.
 //
-// Priority is originaldate > date > year, and the order matters -- for album
+// Priority is originaldate > date > year, and the order matters: for album
 // tracks `year`/`date` are frequently the REISSUE or tagging year while
 // `originaldate` carries the real one. "Census Designated - 02 - Lips.flac" tags
 // year 2024 and date 2024-01-01, but the record came out 2023-10-20, which is
 // exactly what its originaldate says.
 //
-// Coverage is uneven and that is fine: masters/ has year on 89/89 and
-// originaldate on 68/89, masters/challenger/ has year on 39/48 and originaldate
-// on none, so most challenger tracks resolve to a bare year and 9 resolve to
-// nothing at all. The field is left off entirely in that case (undefined keys
-// drop out of JSON.stringify) and the client sorts those to the end.
+// Coverage is uneven and that is fine: masters/ has year on nearly every track
+// but originaldate on only a majority of them, masters/challenger/ has year on
+// most tracks and originaldate on none, so most challenger tracks resolve to a
+// bare year and a handful resolve to nothing at all. The field is left off
+// entirely in that case (undefined keys drop out of JSON.stringify) and the
+// client sorts those to the end
 function normalizeReleaseDate(value) {
     if (value === undefined || value === null) return undefined;
     // Both ID3 and Vorbis allow YYYY, YYYY-MM and YYYY-MM-DD, and taggers append
     // a time component ("2023-10-20T00:00:00Z") often enough to be worth
     // tolerating. Anything not starting with a plausible year is dropped rather
-    // than guessed at -- a wrong date sorts silently, which is the worst kind.
+    // than guessed at: a wrong date sorts silently, which is the worst kind
     const match = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?/.exec(String(value).trim());
     if (!match) return undefined;
     const [, year, month, day] = match;
@@ -155,7 +156,7 @@ function normalizeReleaseDate(value) {
 // Base name -> source master path, built once. A missing directory is the normal
 // CI case, not an error: `push-masters` only ever uploads out/masters, so a
 // runner that ran `pull-masters` has the m4a copies and no sources whatsoever.
-// Same shape as sourcePath() in resolve-links.js.
+// Same shape as sourcePath() in resolve-links.js
 let sourceByBase = null;
 let warnedNoSources = false;
 async function sourcePath(filename) {
@@ -167,7 +168,7 @@ async function sourcePath(filename) {
             }
         } catch {
             // Warn once and carry on. A scan must stay possible on a machine
-            // without the sources -- it just falls back to the registry below.
+            // without the sources; it just falls back to the registry below
             warnedNoSources = true;
             console.warn(
                 `\n⚠ No source masters at ${SRC_MASTERS_DIR}.\n` +
@@ -184,7 +185,7 @@ async function sourcePath(filename) {
 //
 // Read from the SOURCE master, never from the converted out/masters/*.m4a this
 // script walks. ffmpeg drops `originaldate` on FLAC -> m4a, so the m4a's tags are
-// always a subset of the source's -- the priority chain silently falls through to
+// always a subset of the source's: the priority chain silently falls through to
 // `date` there and every album track resolves to its tagging year (Lips came out
 // as 2024-01-01 instead of 2023-10-20). The m4a can therefore never supply a
 // value the source did not already have, which is why there is no m4a fallback
@@ -192,15 +193,15 @@ async function sourcePath(filename) {
 //
 // When the source is unreachable, carry the registry's existing value forward
 // untouched. This is NOT a hole in the "tags are the source of truth, fix it at
-// the tag" rule -- it is the same precedent as `entry.isrc`, which
-// resolve-links.js persists into the registry for exactly this reason: the m4a
-// cannot carry the tag, so the registry is where the value lives. Without it the
-// Sync Metadata workflow (which pulls m4a masters and re-scans) would recompute
-// every date from tags it cannot see and wipe a correct local scan.
+// the tag" rule: it is the same precedent as `entry.isrc`, which resolve-links.js
+// persists into the registry for exactly this reason (the m4a cannot carry the
+// tag, so the registry is where the value lives). Without it the Sync Metadata
+// workflow (which pulls m4a masters and re-scans) would recompute every date from
+// tags it cannot see and wipe a correct local scan.
 //
 // The source WINS over the persisted value when both exist, which is the one
 // place this differs from readIsrc's "persisted first". An ISRC never changes; a
-// release date is a tag that can be corrected, and a fix has to be able to land.
+// release date is a tag that can be corrected, and a fix has to be able to land
 async function resolveReleaseDate(filename, existingEntry) {
     const src = await sourcePath(filename);
     if (src) {
@@ -212,7 +213,7 @@ async function resolveReleaseDate(filename, existingEntry) {
             }
             // The source really has no usable date. Fall through rather than
             // returning: a value already in the registry (hand-checked, or read
-            // before a re-tag stripped it) is better than dropping the field.
+            // before a re-tag stripped it) is better than dropping the field
         } catch (err) {
             console.warn(`  Could not read tags from ${path.basename(src)}: ${err.message}`);
         }
@@ -231,10 +232,10 @@ async function getFileHash(filePath) {
 
 // Cover file names are derived from the album name. The replacement is kept
 // exactly as it always was so existing slugs (and the R2 objects behind them)
-// do not move -- the only addition is a fallback for names that contain no
+// do not move; the only addition is a fallback for names that contain no
 // alphanumerics at all, which used to collapse to a single "-.webp" shared by
 // every such album. The fallback hashes the name rather than using a song id so
-// it stays stable no matter which track of the album is scanned first.
+// it stays stable no matter which track of the album is scanned first
 function albumSlug(albumName) {
     const slug = albumName.toLowerCase().replace(/[^a-z0-9]/g, '-');
     if (/[a-z0-9]/.test(slug)) return slug;
@@ -247,7 +248,7 @@ function albumSlug(albumName) {
 // otherwise treat the whole loosies pile as a single record and starve the
 // selection), and gives each track its own cover instead of one shared image.
 // The one-track grouping also sets isSingle, which the UI already uses to hide
-// the album line.
+// the album line
 function effectiveAlbum(albumName, title) {
     if (MODE.singlesAsOwnAlbum && NON_ALBUM_LABELS.has(albumName)) return title;
     return albumName;
@@ -295,10 +296,10 @@ async function extractArt(songPath, albumName, metadata) {
 
 // Two masters that are the same recording are invisible to everything else: the
 // tags differ, the content hashes differ, and generate-daily's songKey does not
-// collapse them -- so the same audio can become the answer to two days, or even
+// collapse them, so the same audio can become the answer to two days, or even
 // to two rounds of one day. Warn rather than fail: a false positive must not
 // block a scan, and the fix (retire one master, delete its registry entry) is a
-// judgement call.
+// judgement call
 async function reportDuplicates(registry) {
     const tracks = Object.entries(registry).map(([id, e]) => ({
         id,
@@ -334,7 +335,7 @@ async function reportDuplicates(registry) {
 // generate-daily.js now refuses to draw those (its pool is the catalog, not the
 // registry), so a leftover row can no longer produce an unguessable round. It is
 // still dead weight that makes the two files disagree, and only a human can
-// decide whether a master went missing on purpose, so say so.
+// decide whether a master went missing on purpose, so say so
 function reportRetired(registry, songList) {
     const live = new Set(songList.map((s) => s.id));
     const retired = Object.keys(registry).filter((id) => !live.has(id));
@@ -369,7 +370,7 @@ async function scanSongs() {
         const albumsMap = new Map();
         // Where each release date came from. Reported at the end so a run that
         // silently lost the sources (CI, or a machine without masters/) is
-        // visible as a wall of "carried" rather than passing for a clean scan.
+        // visible as a wall of "carried" rather than passing for a clean scan
         const dateSources = { source: 0, carried: 0, none: 0 };
 
         await fs.mkdir(path.dirname(SONGLIST_OUTPUT_FILE), { recursive: true });
@@ -435,7 +436,7 @@ async function scanSongs() {
                 }
 
                 // Needs the matched entry, so it runs after identification: the
-                // registry is the fallback when the source master is unreachable.
+                // registry is the fallback when the source master is unreachable
                 const { releaseDate, from: dateFrom } = await resolveReleaseDate(
                     file,
                     existingEntry
@@ -460,15 +461,13 @@ async function scanSongs() {
                     contentHash,
                     // Owned by scan-songs.js like the master fields above, not by
                     // resolve-links.js: they are derived from the tags and from
-                    // what the previous scan saw, so nothing else writes them.
+                    // what the previous scan saw, so nothing else writes them
                     ...provenance.fields,
                     links: existingEntry?.links || {},
-                    // Preserve resolve-links.js state across re-scans (undefined
-                    // keys drop out of JSON). scan-songs.js owns only the master
-                    // fields above; these link fields belong to resolve-links.js
-                    // and are carried untouched so a re-scan never clobbers link
-                    // health: the ISRC read from source masters, the dated "no
-                    // hit" stamps per source, and the hidden dead links.
+                    // Carried across re-scans, untouched: these fields belong to
+                    // resolve-links.js (the ISRC read from source masters, the
+                    // dated "no hit" stamps per source, the hidden dead links), so
+                    // a re-scan here must never clobber link health
                     isrc: existingEntry?.isrc,
                     tried: existingEntry?.tried,
                     deadLinks: existingEntry?.deadLinks,
@@ -477,7 +476,7 @@ async function scanSongs() {
                     // awaiting a human accept/reject, URLs a human already
                     // rejected, and the "zero links is expected here" marker.
                     // Manual triage is stored in the registry, so leaving these
-                    // out would make the next scan silently discard the review.
+                    // out would make the next scan silently discard the review
                     needsReview: existingEntry?.needsReview,
                     rejectedLinks: existingEntry?.rejectedLinks,
                     linksOptional: existingEntry?.linksOptional,
@@ -505,9 +504,9 @@ async function scanSongs() {
                 // releaseDate rides along for the same reason: the browser's
                 // release sort would otherwise need the registry, which is not
                 // something the client ever loads. It is not provenance and does
-                // NOT feed a badge -- trackProvenance looks only at title and
+                // NOT feed a badge: trackProvenance looks only at title and
                 // album, so adding this field to every entry on the next scan
-                // announces nothing.
+                // announces nothing
                 songList.push({
                     id: foundId,
                     title,
