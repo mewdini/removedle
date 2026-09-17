@@ -72,7 +72,10 @@
     });
 
     $effect(() => {
-        if (!date) return;
+        if (!date) {
+            loading = false;
+            return;
+        }
 
         // Depend on the mode as well as the date. Switching modes on a dated URL
         // (/2026-07-26 -> /challenger/2026-07-26) keeps the same route and the
