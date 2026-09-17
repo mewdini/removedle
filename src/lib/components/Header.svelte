@@ -85,8 +85,11 @@
          it sat directly beneath the song citation and read as a credit for the
          song itself. -->
     <p class="text-sm text-theme-text">
-        by <a class="hover:underline" target="_blank" rel="noreferrer" href={TWITTER_PROFILE_URL}
-            >mewdini</a
+        by <a
+            class="underline decoration-dotted underline-offset-2"
+            target="_blank"
+            rel="noreferrer"
+            href={TWITTER_PROFILE_URL}>mewdini</a
         >
     </p>
     <span class="px-4 text-center">
