@@ -15,8 +15,8 @@
     import { resolve } from '$app/paths';
     import { calculatePoints, calculateRoundsCorrect } from '$lib/gameUtils';
     import StreamingLinks from './StreamingLinks.svelte';
-    import { onMount } from 'svelte';
     import { chooseTip } from '$lib/tipChooser';
+    import { untrack } from 'svelte';
 
     const { day, isToday, date, mode, songList, dailyMeta, gameState, player, globalData, stats } =
         $props();
@@ -24,8 +24,18 @@
     let copyText = $state(SHARE_TEXT);
     let selectedTip: Tip | null = $state(null);
 
-    onMount(() => {
-        selectedTip = chooseTip();
+    // Keyed on gameState, not a plain onMount: the debug preview (Konami
+    // code) can rebuild its results while this same Results instance stays
+    // mounted, retriggering without ever unmounting first, and onMount alone
+    // would only ever pick a tip for the very first one
+    //
+    // selectedTip is read through untrack(): passing it to chooseTip() as a
+    // plain reactive read would make this effect depend on its own output,
+    // so writing it back here would re-trigger the effect forever
+    // (effect_update_depth_exceeded)
+    $effect(() => {
+        void gameState;
+        selectedTip = chooseTip(untrack(() => selectedTip));
     });
 
     let expandedSongs = $state<boolean[]>(Array(MAX_ROUNDS).fill(false));
@@ -244,7 +254,16 @@
                 </span>
                 <p class="text-center text-sm">
                     {#each selectedTip.segments as segment (segment)}
-                        {#if segment.href}
+                        {#if segment.internal}
+                            <a
+                                class="underline"
+                                class:font-bold={segment.bold}
+                                href={resolve('/[[mode=mode]]/[date=date]', {
+                                    mode: modeParam(MODES.challenger),
+                                    date,
+                                })}>{segment.text}</a
+                            >
+                        {:else if segment.href}
                             <a
                                 class="underline"
                                 class:font-bold={segment.bold}
