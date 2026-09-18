@@ -2,7 +2,14 @@
     import { Searcher } from 'fast-fuzzy';
     import { GUESSES_PER_ROUND, MAX_ROUNDS } from '$lib/statics';
     import { onDestroy, onMount, untrack } from 'svelte';
-    import type { GameState, GuessStatus, Song } from '$lib/interfaces';
+    import type {
+        DailyMeta,
+        GameState,
+        Guess,
+        GuessStatus,
+        RoundStatus,
+        Song,
+    } from '$lib/interfaces';
     import Board from './Board.svelte';
     import Results from './Results.svelte';
     import {
@@ -18,6 +25,7 @@
     import { invalidate } from '$app/navigation';
     import { calculateDays, getGameDate } from '$params/date';
     import { gameStorageKey, modeParam, resolveMode, statsStorageKey } from '$lib/modes';
+    import { themes, type ThemeName } from '$lib/themes';
 
     // DM compose intent (not the profile) so a broken-challenge report lands directly in mewdini's inbox
     // `text=` is dropped on purpose
@@ -360,9 +368,192 @@
     function toggleResults() {
         showResults = !showResults;
     }
+
+    // Debug preview: the Konami code opens Results with randomized placeholder
+    // guesses, entirely separate from `gameState`/`showResults` so it can never
+    // touch the real save data or trip the saveScoreToDb effect above, which is
+    // keyed on `showResults` alone
+    const KONAMI_CODE = [
+        'ArrowUp',
+        'ArrowUp',
+        'ArrowDown',
+        'ArrowDown',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowLeft',
+        'ArrowRight',
+        'b',
+        'a',
+    ];
+
+    type DebugStats = {
+        currentStreak: number;
+        bestStreak: number;
+        lastChallengeCompletedDate: string;
+    };
+    type DebugPreviewData = {
+        gameState: GameState;
+        dailyMeta: DailyMeta;
+        songList: Song[];
+        date: string;
+        day: number;
+        stats: DebugStats;
+    };
+
+    let debugPreview = $state(false);
+    let debugData: DebugPreviewData | null = $state(null);
+    // Only for excluding a repeat on the next pick, not shown anywhere, so
+    // this stays a plain `let` rather than $state
+    let debugPreviousTheme: ThemeName | null = null;
+    // The player's real theme, captured the moment the preview first swaps it
+    // out, so Escape can put it back rather than leaving a random theme applied
+    let debugOriginalTheme: ThemeName | null = null;
+
+    function randomRound(correctSong: Song): { guesses: Guess[]; status: RoundStatus } {
+        const won = Math.random() < 0.6;
+        const count = won ? 1 + Math.floor(Math.random() * GUESSES_PER_ROUND) : GUESSES_PER_ROUND;
+        const guesses: Guess[] = [];
+        for (let i = 0; i < count; i++) {
+            if (won && i === count - 1) {
+                guesses.push({ status: 'correct', id: correctSong.id, title: correctSong.title });
+                continue;
+            }
+            const status: GuessStatus = Math.random() < 0.15 ? 'skip' : 'wrong';
+            const wrongSong = songList[Math.floor(Math.random() * songList.length)];
+            guesses.push({
+                status,
+                id: status === 'skip' ? '' : (wrongSong?.id ?? ''),
+                title: status === 'skip' ? '' : (wrongSong?.title ?? 'Unknown'),
+            });
+        }
+        return { guesses, status: won ? 'won' : 'lost' };
+    }
+
+    // Reuses whatever's already loaded for the current date/mode rather than
+    // picking a different day: a random day isn't guaranteed to have a
+    // generated challenge (local dev in particular has real gaps), and a
+    // debug preview that can 404 is worse than one that just mirrors today
+    function buildDebugGameState(
+        targetDailyMeta: DailyMeta,
+        targetDate: string,
+        targetDay: number
+    ): DebugPreviewData {
+        const roundGuesses: Guess[][] = [];
+        const roundStatuses: RoundStatus[] = [];
+
+        for (let i = 0; i < MAX_ROUNDS; i++) {
+            const correctSong =
+                songList.find((s) => s.id === targetDailyMeta.rounds[i]?.songId) ??
+                songList[Math.floor(Math.random() * songList.length)];
+            const round = randomRound(correctSong);
+            roundGuesses.push(round.guesses);
+            roundStatuses.push(round.status);
+        }
+
+        // Bounded so "best" always reads as a real personal best rather than
+        // a wildly larger number sitting next to a small "current"
+        const bestStreak = Math.floor(Math.random() * 30);
+        const currentStreak = Math.floor(Math.random() * (bestStreak + 1));
+
+        return {
+            gameState: {
+                currentRound: MAX_ROUNDS - 1,
+                roundGuesses,
+                roundStatuses,
+                hasSaved: true,
+            },
+            dailyMeta: targetDailyMeta,
+            songList,
+            date: targetDate,
+            day: targetDay,
+            stats: { currentStreak, bestStreak, lastChallengeCompletedDate: '' },
+        };
+    }
+
+    // No-op without a loaded challenge, rather than a debug view with nothing
+    // real to show
+    function activateDebugPreview() {
+        if (!dailyMeta || songList.length === 0) return;
+
+        debugData = buildDebugGameState(dailyMeta, date, day);
+
+        // Temporary only: applied directly to the shared settings so the
+        // existing theme effect in +layout.svelte picks it up, but never
+        // routed through saveSettings(), so it never reaches localStorage
+        // and Escape below can put the real theme straight back
+        if (settings) {
+            if (debugOriginalTheme === null) debugOriginalTheme = settings.theme;
+            const themeNames = Object.keys(themes) as ThemeName[];
+            let nextTheme = themeNames[Math.floor(Math.random() * themeNames.length)];
+            while (themeNames.length > 1 && nextTheme === debugPreviousTheme) {
+                nextTheme = themeNames[Math.floor(Math.random() * themeNames.length)];
+            }
+            debugPreviousTheme = nextTheme;
+            settings.theme = nextTheme;
+        }
+
+        debugPreview = true;
+    }
+
+    let konamiProgress = 0;
+
+    onMount(() => {
+        function onKeydown(event: KeyboardEvent) {
+            // OS key-repeat fires several keydowns for one held key. A real
+            // typed sequence can easily catch one of these (holding a key a
+            // moment too long), which would insert an extra repeat of that
+            // key where the next distinct key was expected and reset
+            // progress to 0. Ignored entirely, not just de-duplicated,
+            // since a genuine repeat is never part of the intended sequence
+            if (event.repeat) return;
+
+            if (event.key === 'Escape' && debugPreview) {
+                debugPreview = false;
+                if (debugOriginalTheme !== null && settings) {
+                    settings.theme = debugOriginalTheme;
+                    debugOriginalTheme = null;
+                }
+                return;
+            }
+
+            const expected = KONAMI_CODE[konamiProgress];
+            const matches = expected.startsWith('Arrow')
+                ? event.key === expected
+                : event.key.toLowerCase() === expected;
+            konamiProgress = matches ? konamiProgress + 1 : event.key === KONAMI_CODE[0] ? 1 : 0;
+
+            if (konamiProgress === KONAMI_CODE.length) {
+                konamiProgress = 0;
+                activateDebugPreview();
+            }
+        }
+
+        // Capture phase, the more defensive choice against anything
+        // downstream intercepting the event first
+        window.addEventListener('keydown', onKeydown, true);
+        return () => window.removeEventListener('keydown', onKeydown, true);
+    });
 </script>
 
-{#if !loading && dailyMeta}
+{#if debugPreview && debugData}
+    <div class="flex w-full flex-col items-center justify-center">
+        <p class="mb-2 text-center text-xs text-theme-muted">
+            Debug preview: randomized, not saved. Press Esc to exit.
+        </p>
+        <Results
+            day={debugData.day}
+            {isToday}
+            date={debugData.date}
+            {mode}
+            songList={debugData.songList}
+            dailyMeta={debugData.dailyMeta}
+            gameState={debugData.gameState}
+            {player}
+            {globalData}
+            stats={debugData.stats}
+        />
+    </div>
+{:else if !loading && dailyMeta}
     <div class="flex w-full flex-col items-center justify-center">
         {#if !showResults}
             <Board

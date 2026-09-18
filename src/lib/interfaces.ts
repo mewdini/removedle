@@ -111,6 +111,11 @@ export type SharedSnippetPlayer = {
 export type TipSegment = {
     text: string;
     href?: string;
+    // Links to Challenger in the current player's own game day, rather than a
+    // fixed href: tip data has no access to the date or resolve(), and this
+    // keeps it internal navigation (same tab) instead of the external-link
+    // treatment every other href gets
+    internal?: boolean;
     bold?: boolean;
 };
 

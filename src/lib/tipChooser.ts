@@ -29,7 +29,7 @@ export const TIPS: Tip[] = [
     {
         segments: [
             { text: "There's a second daily game, " },
-            { text: 'Challenger', bold: true },
+            { text: 'Challenger', bold: true, internal: true },
             {
                 text: ', with a completely different catalog of obscure songs!',
             },
@@ -46,6 +46,16 @@ export const TIPS: Tip[] = [
     },
 ];
 
-export function chooseTip() {
-    return TIPS[Math.floor(Math.random() * TIPS.length)];
+// `exclude` keeps a re-trigger (the debug preview can rebuild repeatedly
+// without this component ever unmounting) from landing on the same tip twice
+// in a row. Reference equality is enough since TIPS entries are stable
+// singletons, never copied
+export function chooseTip(exclude?: Tip | null) {
+    if (TIPS.length <= 1) return TIPS[0];
+
+    let pick: Tip;
+    do {
+        pick = TIPS[Math.floor(Math.random() * TIPS.length)];
+    } while (pick === exclude);
+    return pick;
 }
