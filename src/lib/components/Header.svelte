@@ -15,7 +15,7 @@
     import StreamingLinks from './game/StreamingLinks.svelte';
     import { themes } from '$lib/themes';
     import { page } from '$app/state';
-    import { MODE_LIST, modeParam, resolveMode, type ModeConfig } from '$lib/modes';
+    import { MODE_LIST, MODES, modeParam, resolveMode, type ModeConfig } from '$lib/modes';
 
     // The numeric id form, not /shotnochaser -- X redirects it to the current
     // handle, so the link survives a username change
@@ -80,7 +80,9 @@
 <div class="flex w-full flex-col items-center justify-center gap-2 pt-4 align-middle">
     <!-- The type scale lives in Logo.svelte, which varies it by which name it is
          rendering (the janedle alias is nearly twice as long). -->
-    <Logo class="text-theme-text" />
+    <a href={resolve('/[[mode=mode]]', { mode: modeParam(currentMode) })}>
+        <Logo class="text-theme-text" />
+    </a>
     <!-- The byline belongs to the wordmark, not to the tagline: under the tagline
          it sat directly beneath the song citation and read as a credit for the
          song itself. -->
@@ -96,7 +98,28 @@
         <!-- The citation runs on from the quote rather than taking a line of its
              own, to keep the header stack short. A span rather than a p because
              StreamingLinks renders a div, and the parser closes a p on one. -->
-        <span class="block text-lg text-theme-text">
+        <!-- text-lg reads fine for normal's short one-liner, but challenger's
+             is long enough to wrap 3 lines at that size on a phone, which is
+             too much weight for a decoration rather than important
+             information. The page's own max-w-[800px] caps how wide this
+             ever gets regardless of monitor size, so past ~1024px there's
+             enough room for challenger's text-lg to read as a normal 2-line
+             blurb instead of a cramped 3-line one, rather than actually
+             reaching a single line the way normal's short text does.
+             min-h reserves the taller of the two modes at each breakpoint
+             (33px for challenger's xs/2-line below lg, 56px for its lg/2-line
+             at and above lg) against normal's shorter 28px, so the icon row
+             below never shifts when the mode toggle swaps which is showing.
+             flex+justify-center centers normal's single line in that reserved
+             space rather than leaving it pinned to the top with a visible
+             gap underneath, most noticeable on desktop where the reserved
+             56px is exactly double its own 28px -->
+        <span
+            class="flex min-h-[33px] flex-col items-center justify-center text-theme-text lg:min-h-[56px] {currentMode.id ===
+            MODES.normal.id
+                ? 'text-lg'
+                : 'text-xs lg:text-lg'}"
+        >
             {currentMode.blurb}
             {#if currentMode.blurbSong}
                 <span class="group inline-block align-middle text-xs text-theme-muted italic">
