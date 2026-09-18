@@ -54,7 +54,7 @@ export const MODES: Record<ModeId, ModeConfig> = {
         startDate: '2026-07-24',
         shareLabel: 'removedle',
         primaryArtist: 'Jane Remover',
-        blurb: 'Guess a Jane Remover song every day!',
+        blurb: 'Guess the Jane Remover songs daily!',
     },
     challenger: {
         id: 'challenger',
