@@ -13,16 +13,10 @@
     } from '$lib/modes';
     import {
         albumReleaseKeys,
-        catalogFlag,
         describeAge,
-        describeChange,
-        flagDate,
-        lastTouched,
+        isNewTrack,
         matchesQuery,
-        RECENT_WINDOW_DAYS,
-        releaseKey,
         releaseYear,
-        type CatalogFlag,
     } from '$lib/catalog';
     import { getGameDate } from '$params/date';
     import Modal from './Modal.svelte';
@@ -35,29 +29,24 @@
 
     // The mode being PLAYED, which is not necessarily the one being browsed
     const pageMode = $derived(resolveMode(page.data.mode));
-    // The live game day, which the NEW/UPDATED badge window is measured against.
-    // Same reckoning the pipeline stamps addedAt/updatedAt with, so a song
-    // published in the evening is not immediately described as "yesterday"
+    // The live game day, which the NEW badge window is measured against. Same
+    // reckoning the pipeline stamps addedAt with, so a song published in the
+    // evening is not immediately described as "yesterday"
     const today = getGameDate();
 
-    type SortKey = 'title' | 'album' | 'release' | 'recent';
+    type SortKey = 'title' | 'album';
 
-    // Four pills rather than a <select>: at these labels the row is ~230px wide,
-    // which still clears the narrowest case (a 320px viewport gives the modal
-    // body 264px, after mx-3 and p-4), and on mobile it sits on its own line
-    // under the search box. Labels are kept to one short word for that budget.
+    // Two pills rather than a <select>: narrow enough to clear the mobile
+    // width budget (a 320px viewport gives the modal body 264px, after mx-3
+    // and p-4), and on mobile it sits on its own line under the search box.
     //
-    // "Updated", not "Newest": there are two different dates on this screen and
-    // "Newest" names neither of them unambiguously. Next to a "Year" pill it
-    // reads as "the newest MUSIC", which is what Year already does. These two
-    // sorts genuinely disagree (a 2018 demo added last week is the oldest track
-    // and the newest entry), so the labels have to say which date they mean.
-    // Each pill also carries a title attribute spelling it out in full
+    // No dedicated Year sort: it only reordered individual tracks by their
+    // own release date with no album grouping, which is a narrower view of
+    // what Album already gives you (album release order, then track order
+    // within it) plus the actual tracklist sequencing Year couldn't offer.
     const SORTS = [
         ['title', 'A-Z', 'Sort by title'],
         ['album', 'Album', 'Sort by album release order, then by track order within it'],
-        ['release', 'Year', 'Sort by release date, newest music first'],
-        ['recent', 'Updated', 'Sort by what was most recently added to or changed in the catalog'],
     ] as const satisfies readonly (readonly [SortKey, string, string])[];
 
     let browsingId = $state<ModeId>(MODES.normal.id);
@@ -119,15 +108,8 @@
     // Computed over the whole browsed catalog, not `matches`, so filtering
     // down to a search doesn't reorder albums relative to each other
     const albumOrder = $derived(albumReleaseKeys(songs));
-
-    const flagged = $derived(
-        matches
-            .map((song) => ({ song, flag: catalogFlag(song, browsing, today) }))
-            .filter((r): r is { song: Song; flag: CatalogFlag } => r.flag !== null)
-            .sort((a, b) =>
-                (flagDate(b.song, b.flag) ?? '').localeCompare(flagDate(a.song, a.flag) ?? '')
-            )
-    );
+    // isSingle per album name, same shape and reason as albumOrder above
+    const albumIsSingle = $derived(new Map(albums.map((a) => [a.name, a.isSingle])));
 
     const byTitle = (a: Song, b: Song) =>
         a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
@@ -139,19 +121,27 @@
         [...matches].sort((a, b) => {
             switch (sort) {
                 case 'album': {
+                    // Real albums before loosies (singlesAsOwnAlbum's one-track
+                    // "albums"), as two separate blocks each sorted by date among
+                    // themselves, rather than interleaving a loosie's own release
+                    // date between two actual albums
+                    const aSingle = albumIsSingle.get(a.album) ?? false;
+                    const bSingle = albumIsSingle.get(b.album) ?? false;
+                    if (aSingle !== bSingle) return aSingle ? 1 : -1;
                     // Albums ordered by their own earliest track (albumOrder, see
-                    // $lib/catalog), newest first, matching the Year sort's direction
-                    // Undated albums go to the end, same convention as Year
+                    // $lib/catalog), newest first. Undated albums go to the end
                     const ra = albumOrder.get(a.album) ?? '';
                     const rb = albumOrder.get(b.album) ?? '';
                     if (ra !== rb) return !ra || !rb ? (ra ? -1 : 1) : rb.localeCompare(ra);
+                    // Two different albums tied on the same rank key (undated
+                    // loosies under singlesAsOwnAlbum tie constantly, all at '')
+                    // still need to sort as two separate contiguous blocks, not
+                    // interleave by title, or a real multi-track album caught in
+                    // the same tie loses its own internal grouping
+                    if (a.album !== b.album) return a.album.localeCompare(b.album);
                     // Same album: the track's own position on the release
                     // Falls back to title when either side has no track number, since
                     // an untagged track can't be placed against its numbered neighbors
-                    // Under challenger's singlesAsOwnAlbum every loosie is its own
-                    // one-track "album", so two different loosies only reach this
-                    // branch on a shared release date, and title is the right
-                    // tiebreak there too
                     if (
                         a.trackNumber != null &&
                         b.trackNumber != null &&
@@ -161,33 +151,34 @@
                     }
                     return byTitle(a, b);
                 }
-                case 'release': {
-                    // Newest release first, matching the direction of "Updated".
-                    // Tracks with no date go to the END: an empty sort key would
-                    // otherwise lead the list, and 9 blank rows above everything
-                    // reads as a bug rather than as missing metadata
-                    const ka = releaseKey(a);
-                    const kb = releaseKey(b);
-                    if (!ka || !kb) return ka === kb ? byTitle(a, b) : ka ? -1 : 1;
-                    return kb.localeCompare(ka) || byTitle(a, b);
-                }
-                case 'recent':
-                    return lastTouched(b).localeCompare(lastTouched(a)) || byTitle(a, b);
                 default:
                     return byTitle(a, b);
             }
         })
     );
 
-    // The changelist is a shortcut to the top of a list that does not otherwise
-    // surface recent changes: A-Z, album and release order all scatter them.
-    // Under "Updated" the list already leads with the same tracks, so repeating
-    // them would only push the catalog down the page
-    const showRecent = $derived(sort !== 'recent' && !query.trim() && flagged.length > 0);
-
     function albumOf(song: Song) {
         return albums.find((a: AlbumArt) => a.name === song.album);
     }
+
+    // Consecutive runs of `ordered`, since album sort already groups same-album
+    // tracks together. Loosies are excluded and handled separately below: a
+    // heading naming a one-track "album" just repeats that track's own title
+    // back at it, so they render as one flat, undivided-by-heading list instead
+    const albumGroups = $derived.by(() => {
+        const groups: { name: string; songs: Song[] }[] = [];
+        for (const song of ordered) {
+            if (albumIsSingle.get(song.album)) continue;
+            const current = groups.at(-1);
+            if (current?.name === song.album) {
+                current.songs.push(song);
+            } else {
+                groups.push({ name: song.album, songs: [song] });
+            }
+        }
+        return groups;
+    });
+    const loosies = $derived(ordered.filter((song) => albumIsSingle.get(song.album)));
 
     /**
      * The "artist · album · year" line under a title, as the segments that
@@ -213,21 +204,17 @@
     }
 </script>
 
-{#snippet badge(flag: CatalogFlag, when: string | undefined)}
+{#snippet badge(when: string | undefined)}
     <span
-        class="shrink-0 rounded-full px-2 py-[1px] text-[9px] font-bold tracking-widest uppercase {flag ===
-        'new'
-            ? 'bg-theme-accent text-theme-text'
-            : 'text-theme-muted ring-1 ring-theme-muted'}"
-        title={when ? `${flag === 'new' ? 'Added' : 'Changed'} ${describeAge(when, today)}` : ''}
+        class="shrink-0 rounded-full bg-theme-accent px-2 py-[1px] text-[9px] font-bold tracking-widest text-theme-text uppercase"
+        title={when ? `Added ${describeAge(when, today)}` : ''}
     >
-        {flag}
+        new
     </span>
 {/snippet}
 
-{#snippet row(song: Song, flag: CatalogFlag | null)}
+{#snippet row(song: Song, isNew: boolean)}
     {@const album = albumOf(song)}
-    {@const change = flag === 'updated' ? describeChange(song) : null}
     {@const year = releaseYear(song)}
     <li class="flex flex-row gap-3 py-2">
         <AlbumArtComponent
@@ -239,8 +226,8 @@
         <div class="flex min-w-0 flex-1 flex-col gap-0.5">
             <div class="flex flex-row flex-wrap items-center gap-x-2 gap-y-1">
                 <span class="text-sm font-semibold break-words text-theme-text">{song.title}</span>
-                {#if flag}
-                    {@render badge(flag, flagDate(song, flag))}
+                {#if isNew}
+                    {@render badge(song.addedAt)}
                 {/if}
             </div>
             <!-- Built as parts and joined, not inline {#if}s around a literal
@@ -261,9 +248,6 @@
                         >{:else}{part.text}{/if}
                 {/each}
             </span>
-            {#if change}
-                <span class="text-[11px] text-theme-muted italic">{change}</span>
-            {/if}
             <!-- Every track that has any link gets them here. This is the whole
                  point of the browser: the catalog is full of leaks and demos
                  nobody can be expected to recognise from the title alone -->
@@ -306,12 +290,13 @@
                  second name on a challenger remix ("Charli XCX - I Finally
                  Understand (remix)") lives in the title. matchesQuery still
                  checks the artist field anyway; see the note there -->
+            <!-- text-base, not text-sm: under 16px, iOS Safari zooms the page on focus -->
             <input
                 type="search"
                 placeholder="Search by title or album"
                 aria-label="Search the catalog by title or album"
                 bind:value={query}
-                class="min-w-0 flex-1 rounded-lg border border-theme-text bg-theme-bg p-2 text-sm text-theme-text outline-none focus:ring-2 focus:ring-theme-accent"
+                class="min-w-0 flex-1 rounded-lg border border-theme-text bg-theme-bg p-2 text-base text-theme-text outline-none focus:ring-2 focus:ring-theme-accent"
             />
             <div
                 role="group"
@@ -346,11 +331,8 @@
             </div>
         {:else}
             <p class="text-xs text-theme-muted">
-                {songs.length}
-                {songs.length === 1 ? 'song' : 'songs'} can come up in {browsing.label}{#if query.trim()},
-                    {matches.length}
-                    matching{/if}. Badges mark anything added or retitled in the last {RECENT_WINDOW_DAYS}
-                days.
+                {matches.length}
+                {matches.length === 1 ? 'match' : 'matches'}
             </p>
 
             <!-- Fixed height, not just a cap: a short match count (or zero) used
@@ -363,29 +345,41 @@
                  the outer max-h-[90dvh] cap to clip against Safari's
                  inflated large-viewport height rather than the real
                  visible one -->
-            <div class="h-[55dvh] overflow-y-auto pr-1">
+            <div class="catalog-scroll h-[55dvh] overflow-y-auto pr-1">
                 {#if matches.length === 0}
                     <p class="py-10 text-center text-sm text-theme-muted">
                         Nothing matches “{query.trim()}”.
                     </p>
-                {:else}
-                    {#if showRecent}
-                        <span class="text-xs font-bold tracking-widest text-theme-muted uppercase"
-                            >Recently added or changed</span
+                {:else if sort === 'album'}
+                    {#each albumGroups as group (group.songs[0].id)}
+                        <span
+                            class="mt-3 block text-xs font-bold tracking-widest text-theme-muted uppercase first:mt-0"
+                            >{group.name}</span
                         >
                         <ul class="divide-y divide-theme-muted/25">
-                            {#each flagged as { song, flag } (song.id)}
-                                {@render row(song, flag)}
+                            {#each group.songs as song (song.id)}
+                                {@render row(song, isNewTrack(song, browsing, today))}
                             {/each}
                         </ul>
-                        <hr class="my-3 border-theme-muted" />
-                        <span class="text-xs font-bold tracking-widest text-theme-muted uppercase"
-                            >All tracks</span
+                    {/each}
+                    {#if loosies.length > 0}
+                        <!-- N/A, not each loosie's own title: this is one heading
+                                 for the whole trailing block, not a divider repeating
+                                 40 different one-track "albums" back at themselves -->
+                        <span
+                            class="mt-3 block text-xs font-bold tracking-widest text-theme-muted uppercase first:mt-0"
+                            >N/A</span
                         >
+                        <ul class="divide-y divide-theme-muted/25">
+                            {#each loosies as song (song.id)}
+                                {@render row(song, isNewTrack(song, browsing, today))}
+                            {/each}
+                        </ul>
                     {/if}
+                {:else}
                     <ul class="divide-y divide-theme-muted/25">
                         {#each ordered as song (song.id)}
-                            {@render row(song, catalogFlag(song, browsing, today))}
+                            {@render row(song, isNewTrack(song, browsing, today))}
                         {/each}
                     </ul>
                 {/if}
@@ -393,3 +387,26 @@
         {/if}
     </div>
 </Modal>
+
+<style>
+    /* No Tailwind utility reaches ::-webkit-scrollbar, so this is plain CSS.
+       Thin and near-invisible at rest, closer to the browser's own subtle
+       overlay style, rather than the bulky default track+thumb */
+    .catalog-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: var(--muted-color) transparent;
+    }
+    .catalog-scroll::-webkit-scrollbar {
+        width: 8px;
+    }
+    .catalog-scroll::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .catalog-scroll::-webkit-scrollbar-thumb {
+        background-color: color-mix(in srgb, var(--muted-color) 40%, transparent);
+        border-radius: 9999px;
+    }
+    .catalog-scroll:hover::-webkit-scrollbar-thumb {
+        background-color: color-mix(in srgb, var(--muted-color) 70%, transparent);
+    }
+</style>

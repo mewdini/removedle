@@ -19,13 +19,16 @@ export interface Song {
     // since a "track 1" on one release and a "track 1" on another are unrelated
     // Absent on untagged masters and on manifests published before this field existed
     trackNumber?: number;
-    // Catalog provenance, stamped by scripts/scan-songs.js and used only by the catalog browser
-    // All optional: a manifest published before these existed simply has none, and every consumer
-    // treats that as "no badge"
+    // Catalog provenance, stamped by scripts/scan-songs.js. All optional: a
+    // manifest published before these existed simply has none
     //
-    // `addedAt` on a mode's startDate means "part of the launch catalog", which is the baseline
-    // rather than an event; see trackProvenance() in the scan
-    // `previous*` describe the change `updatedAt` refers to
+    // `addedAt` is the only one the catalog browser reads, for the NEW badge.
+    // `addedAt` on a mode's startDate means "part of the launch catalog", which
+    // is the baseline rather than an event; see trackProvenance() in the scan
+    //
+    // `updatedAt`/`previous*` record a retitle or rebadge but are no longer
+    // surfaced anywhere in the UI -- an UPDATED badge read as developer-only
+    // noise to a player. Kept in the registry as the pipeline's own changelist
     addedAt?: string;
     updatedAt?: string;
     previousTitle?: string;
