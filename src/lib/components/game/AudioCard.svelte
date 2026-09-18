@@ -108,8 +108,10 @@
             {#if isCurrentGuess()}
                 <SearchResults {results} {suggestionIndex} {submitGuess} open={hasOpened} />
             {/if}
+            <!-- text-base, not the old text-md (not a real Tailwind class): 16px
+                 keeps iOS Safari from zooming on focus, same as the catalog search -->
             <input
-                class="text-md my-1 w-full min-w-0 border-none bg-transparent px-2 text-theme-text outline-none focus:ring-0"
+                class="my-1 w-full min-w-0 border-none bg-transparent px-2 text-base text-theme-text outline-none focus:ring-0"
                 type="text"
                 name="guess"
                 aria-label="Guess the song"
