@@ -1,6 +1,8 @@
 <script lang="ts">
     import './layout.css';
     import favicon32 from '$lib/assets/favicon-32x32.png';
+    import royal2Url from '$lib/assets/fonts/Royal2.woff';
+    import poppinsLatinUrl from '@fontsource/poppins/files/poppins-latin-400-normal.woff2';
     import favicon128 from '$lib/assets/favicon-128x128.png';
     import appleTouchIcon from '$lib/assets/apple-touch-icon-180x180.png';
     import favicon192 from '$lib/assets/favicon-192x192.png';
@@ -8,8 +10,14 @@
 
     import '@fontsource/poppins';
     import Header from '$lib/components/Header.svelte';
-    import { DESCRIPTION, SITE, siteName } from '$lib/statics.js';
-    import { onMount } from 'svelte';
+    import {
+        DESCRIPTION,
+        SITE,
+        siteName,
+        THEME_COOKIE,
+        THEME_COOKIE_MAX_AGE,
+    } from '$lib/statics.js';
+    import { onMount, untrack } from 'svelte';
     import { setSettingsContext } from '$lib/settings.svelte';
     import { themes } from '$lib/themes';
     import { page } from '$app/state';
@@ -17,7 +25,7 @@
 
     import type { AppSettings } from '$lib/interfaces';
 
-    let { children } = $props();
+    let { children, data } = $props();
 
     // Each mode gets its own title, description and canonical URL, so a shared
     // /challenger link previews as the Challenger game rather than the main one.
@@ -42,9 +50,33 @@
     // origin for the same reason as canonical: a preview shared from either
     // host then points at the one origin. Not $derived: the import is static.
     const previewImage = SITE + favicon128;
+    // Painted straight into the SSR'd <head>, so the correct colors are in the
+    // very first HTML response rather than applied later by the settings
+    // effect below, which only runs client-side after hydration
+    // html:root, not the bare :root layout.css itself uses for its own
+    // hardcoded 'dark' fallback: both rules match the same element, so with
+    // equal specificity the one that is LATER in the document wins, and
+    // layout.css's compiled <style> tag lands after this one. html:root
+    // (0,1,1) beats a plain :root (0,1,0) regardless of order, closing that
+    // gap for every theme but dark, where the two values happen to coincide.
+    // No separate body{} rule needed: layout.css's own already reads
+    // var(--bg-color)/var(--text-color), so fixing the variable is enough
+    const ssrThemeStyleTag = $derived.by(() => {
+        if (!data.theme) return '';
+        const t = themes[data.theme as keyof typeof themes];
+        const css = `html:root{--bg-color:${t.bg};--text-color:${t.text};--accent-color:${t.accent};--card-color:${t.card};--muted-color:${t.muted}}`;
+        return `<style>${css}</style>`;
+    });
+    // Seeded from the theme cookie +layout.server.ts already read, when there
+    // is one, so the very first client render already matches what the SSR'd
+    // <style> block below painted, instead of starting at the hardcoded
+    // default and only correcting once the settings effect runs
+    // untrack, since this is a genuine one-time seed: onMount and saveSettings
+    // own settings.theme from here on, and re-deriving it from data on every
+    // future change to data would fight the user's own later choices
     let settings: AppSettings = $state({
         volume: 10,
-        theme: 'dark',
+        theme: untrack(() => data.theme) ?? 'dark',
         firstTimeHelp: false,
     });
     setSettingsContext(settings);
@@ -63,6 +95,12 @@
                         settings.theme = parsed.theme;
                     }
                     settings.firstTimeHelp = !!parsed.firstTimeHelp;
+
+                    // Anyone with a saved theme from before the cookie existed
+                    // has none yet, so every full page load keeps missing the
+                    // SSR benefit until they happen to open Settings. Writes
+                    // once per mismatch, not every mount
+                    if (settings.theme !== data.theme) saveSettings();
                 }
             } catch (e) {
                 console.error('Failed to parse settings:', e);
@@ -98,10 +136,37 @@
     function saveSettings() {
         const stateToSave = JSON.stringify(settings);
         localStorage.setItem(`removedle-settings`, stateToSave);
+        // Only the theme needs a cookie, since it's the only setting the
+        // server render depends on. Volume and firstTimeHelp stay localStorage-only
+        document.cookie = `${THEME_COOKIE}=${settings.theme}; Max-Age=${THEME_COOKIE_MAX_AGE}; Path=/; SameSite=Lax`;
     }
 </script>
 
 <svelte:head>
+    <link rel="preload" href={royal2Url} as="font" type="font/woff" crossorigin="anonymous" />
+    <!-- Only the latin subset: unicode-range on the other two poppins-*-400
+         subsets (devanagari, latin-ext) already stops the browser fetching
+         them unless the page actually contains those characters, so
+         preloading them too would just waste bandwidth on files that were
+         never going to load anyway -->
+    <link
+        rel="preload"
+        href={poppinsLatinUrl}
+        as="font"
+        type="font/woff2"
+        crossorigin="anonymous"
+    />
+    <!-- {@html}, not a plain <style> tag with an expression inside it
+         Svelte parses any <style> element as CSS wherever it appears, not just
+         its own top-level one, so an interpolated expression there is read as
+         literal invalid CSS text instead of being evaluated
+         ssrThemeStyleTag only ever holds the fixed hex values from
+         $lib/themes, indexed by a cookie value +layout.server.ts already
+         validated against that same theme list, so there is no injected
+         content to escape -->
+    {#if data.theme}
+        {@html ssrThemeStyleTag}
+    {/if}
     <title>{pageTitle}</title>
     <meta name="description" content={pageDescription} />
     <link rel="canonical" href={canonical} />

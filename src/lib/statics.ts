@@ -115,6 +115,14 @@ function siteName(viaAlias: boolean): string {
     return viaAlias ? ALT_NAME : NAME;
 }
 
+// Mirrors the theme already saved in localStorage, written client-side
+// whenever that is, purely so +layout.server.ts can read a player's own theme
+// back and render it into the SSR'd HTML instead of the hardcoded default.
+// Not HttpOnly, since client JS has to write it; a year is long enough that
+// it only needs refreshing on an actual theme change, not every visit
+const THEME_COOKIE = 'removedle-theme';
+const THEME_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
+
 export {
     MAX_ROUNDS,
     GUESSES_PER_ROUND,
@@ -130,6 +138,8 @@ export {
     ALT_COOKIE_MAX_AGE,
     ALT_HOP_COOKIE,
     ALT_HOP_COOKIE_MAX_AGE,
+    THEME_COOKIE,
+    THEME_COOKIE_MAX_AGE,
     siteName,
     DESCRIPTION,
     SITE,
