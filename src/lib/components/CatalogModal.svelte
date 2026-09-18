@@ -356,8 +356,14 @@
             <!-- Fixed height, not just a cap: a short match count (or zero) used
                  to size this area down to its own content, so the whole modal
                  visibly shrank while narrowing a search and grew back on
-                 clearing it -->
-            <div class="h-[55vh] overflow-y-auto pr-1">
+                 clearing it.
+
+                 dvh, not vh: see the note on Modal.svelte's max-h-[90dvh].
+                 55vh compounded with the header content above it could push
+                 the outer max-h-[90dvh] cap to clip against Safari's
+                 inflated large-viewport height rather than the real
+                 visible one -->
+            <div class="h-[55dvh] overflow-y-auto pr-1">
                 {#if matches.length === 0}
                     <p class="py-10 text-center text-sm text-theme-muted">
                         Nothing matches “{query.trim()}”.
