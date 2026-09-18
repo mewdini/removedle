@@ -148,15 +148,6 @@ jobs:
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
-            # Flags a data problem as early as possible, separately from the
-            # buffer/retry system and the challenge-health issue further down
-            # if: always(), since this must still run even if the Generate step
-            # above exited non-zero, which happens when every attempted
-            # generation failed
-            - name: Flag likely-permanent generation failures
-              if: always()
-              run: node scripts/flag-permanent-failures.js
-
             # A second, redundant push of whatever this run generated. Cheap,
             # since out/dailies holds only this run's output and nothing older
             # (it is not cached between runs), and idempotent, so it costs
