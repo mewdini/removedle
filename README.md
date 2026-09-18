@@ -33,7 +33,7 @@ A fork of [underscordle](https://github.com/angelolz/underscordle) by [angelolz]
 - There are two independent games: **Normal** (the official catalog) and **Challenger** (`/challenger`, a separate catalog of obscure tracks). Mode config lives in `src/lib/modes.ts`, and almost every pipeline command takes a `--mode=challenger` flag.
 - Player progress and streaks live in `localStorage`. D1 stores only aggregate `totalGames` / `totalPoints` per date.
 - Song metadata and album art are served publicly from R2 via `assets.removedle.org`.
-- Daily snippets live in a **private** R2 bucket and are served through `src/routes/challenges/[date=date]/[file]`, which refuses any date later than today. Challenges are generated the day before, so a public bucket would leak upcoming answers.
+- Daily snippets live in a **private** R2 bucket and are served through `src/routes/challenges/[[mode=mode]]/[date=date]/[file]`, which refuses any date later than today. Challenges are generated up to a week ahead into a rolling buffer, so a public bucket would leak upcoming answers.
 - The game day rolls over at **9pm Pacific**, so a challenge unlocks worldwide at the same instant regardless of where the player is.
 
 ## Local Development Setup
@@ -92,6 +92,8 @@ Set `startDate` on the relevant mode in `src/lib/modes.ts` to your earliest gene
 pnpm dev
 ```
 
+A `predev` hook generates today's challenge automatically if it's missing, so you don't need to re-run `pnpm generate` by hand every day.
+
 `pnpm preview` builds and serves through `wrangler dev` (port 8787) instead.
 
 ## Deploying
@@ -122,7 +124,7 @@ ALLOW_LOCAL_DEPLOY=1 pnpm deploy:prod
 
 Two GitHub Actions handle content:
 
-- **Daily Challenges**: cron at 06:09 UTC, generates the next game day and pushes to R2
+- **Daily Challenges**: cron at 06:09 UTC, tops up a rolling 7-day buffer of upcoming game days and pushes to R2, retrying failures and filing a GitHub issue for anything that doesn't clear up on its own
 - **Sync Metadata**: manual, re-scans masters and republishes metadata and art
 
 `node scripts/sync-r2.js [pull-masters|pull-data|pull-art|push-masters|push-data|push-challenges]` moves data between `out/` and R2. `push-masters` skips objects already uploaded.
