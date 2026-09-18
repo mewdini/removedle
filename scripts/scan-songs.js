@@ -254,7 +254,48 @@ function effectiveAlbum(albumName, title) {
     return albumName;
 }
 
-async function extractArt(songPath, albumName, metadata) {
+async function convertArt(imageBuffer, imgExt, slug, outputPath, albumName) {
+    const tempInput = path.join(path.dirname(outputPath), `temp-${slug}${imgExt}`);
+    await fs.writeFile(tempInput, imageBuffer);
+
+    try {
+        await runFfmpeg(['-i', tempInput, '-frames:v', '1', '-vf', 'scale=80:80', outputPath]);
+        await fs.unlink(tempInput).catch(() => {});
+        return `/art/${slug}.webp`;
+    } catch (err) {
+        console.warn(`  Could not convert art for ${albumName}: ${err.message}`);
+        await fs.unlink(tempInput).catch(() => {});
+        return null;
+    }
+}
+
+// SoundCloud's public oEmbed endpoint, not the api-v2 client used in
+// resolve-links.js: it needs no scraped client_id and takes any track URL
+// directly, so a plain fetch is enough to get that track's own artwork
+async function fetchSoundCloudArt(trackUrl, albumName) {
+    try {
+        const oembedUrl = `https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(trackUrl)}`;
+        const res = await fetch(oembedUrl, { signal: AbortSignal.timeout(15000) });
+        if (!res.ok) return null;
+
+        const data = await res.json();
+        // oEmbed's own thumbnail_url is a small crop; swapping -large for
+        // -t500x500 asks the same CDN path for SoundCloud's full artwork
+        const artworkUrl = data.thumbnail_url?.replace('-large.jpg', '-t500x500.jpg');
+        if (!artworkUrl) return null;
+
+        const imgRes = await fetch(artworkUrl, { signal: AbortSignal.timeout(15000) });
+        if (!imgRes.ok) return null;
+
+        console.log(`  Fetched art for ${albumName} from its resolved SoundCloud link`);
+        return Buffer.from(await imgRes.arrayBuffer());
+    } catch (err) {
+        console.warn(`  Could not fetch SoundCloud art for ${albumName}: ${err.message}`);
+        return null;
+    }
+}
+
+async function extractArt(songPath, albumName, metadata, existingEntry) {
     const slug = albumSlug(albumName);
     const outputPath = path.join(COVER_DIR, `${slug}.webp`);
 
@@ -265,28 +306,21 @@ async function extractArt(songPath, albumName, metadata) {
         if (metadata.common.picture && metadata.common.picture.length > 0) {
             const picture = metadata.common.picture[0];
             console.log(`  Extracting art from metadata for ${albumName}...`);
-
             const imgExt = picture.format === 'image/png' ? '.png' : '.jpg';
-            const tempInput = path.join(path.dirname(outputPath), `temp-${slug}${imgExt}`);
-            await fs.writeFile(tempInput, picture.data);
+            return await convertArt(picture.data, imgExt, slug, outputPath, albumName);
+        }
 
-            try {
-                await runFfmpeg([
-                    '-i',
-                    tempInput,
-                    '-frames:v',
-                    '1',
-                    '-vf',
-                    'scale=80:80',
-                    outputPath,
-                ]);
-                await fs.unlink(tempInput).catch(() => {});
-                return `/art/${slug}.webp`;
-            } catch (err) {
-                console.warn(`  Could not convert art for ${albumName}: ${err.message}`);
-                await fs.unlink(tempInput).catch(() => {});
-                return null;
-            }
+        // No embedded picture to pull from. Fall back to the artwork on this
+        // song's already-resolved SoundCloud link, if it has one, rather than
+        // an independent image search: resolve-links.js already vetted that
+        // URL as the right recording (title match, runtime, corroborated
+        // uploader under the strict policy), so its artwork inherits that
+        // trust. A fresh search would not, which is why this stays scoped to
+        // a link already sitting in the registry
+        const soundcloudUrl = existingEntry?.links?.soundcloud;
+        if (soundcloudUrl) {
+            const art = await fetchSoundCloudArt(soundcloudUrl, albumName);
+            if (art) return await convertArt(art, '.jpg', slug, outputPath, albumName);
         }
 
         console.log(`  No embedded cover art found for ${albumName}.`);
@@ -497,7 +531,7 @@ async function scanSongs() {
                 // /challenger/art/*version-2*.webp). AlbumArt.svelte already falls
                 // back to a placeholder when `file` is missing, so omitting it here is
                 // the fix, not a workaround
-                const artPath = await extractArt(fullPath, albumName, metadata);
+                const artPath = await extractArt(fullPath, albumName, metadata, existingEntry);
 
                 if (!albumsMap.has(slug)) {
                     albumsMap.set(slug, {
