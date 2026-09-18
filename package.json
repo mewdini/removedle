@@ -5,6 +5,7 @@
     "type": "module",
     "description": "Daily guessing challenge game for Jane Remover's music!",
     "scripts": {
+        "predev": "node scripts/ensure-daily.js",
         "dev": "vite dev",
         "dev:host": "vite dev --host",
         "build": "vite build",
