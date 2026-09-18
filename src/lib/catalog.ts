@@ -2,12 +2,10 @@ import type { Song } from '$lib/interfaces';
 import type { ModeConfig } from '$lib/modes';
 import { calculateDays } from '$params/date';
 
-// How long a track keeps its badge. Long enough that someone who plays a couple
-// of times a week still sees what changed, short enough that the "Recent"
-// section stays a changelist rather than a second copy of the catalog
+// How long a track keeps its NEW badge. Long enough that someone who plays a
+// couple of times a week still sees it, short enough that it stays a
+// changelist rather than a second copy of the catalog
 export const RECENT_WINDOW_DAYS = 14;
-
-export type CatalogFlag = 'new' | 'updated';
 
 /**
  * Whole days between two YYYY-MM-DD dates. calculateDays is 1-based because it
@@ -28,24 +26,13 @@ function isRecent(date: string | undefined, today: string): boolean {
 }
 
 /**
- * Badge for a track, or null. A track added on the mode's start date is part of
- * the launch catalog and never counts as new: otherwise every song would be
- * badged for the game's first two weeks, which tells a player nothing.
- *
- * `new` outranks `updated`: a track added and then retitled inside the same
- * window is news because it arrived, not because its tag was fixed.
+ * Whether a track should carry the NEW badge. A track added on the mode's
+ * start date is part of the launch catalog and never counts: otherwise every
+ * song would be badged for the game's first two weeks, which tells a player
+ * nothing.
  */
-export function catalogFlag(song: Song, mode: ModeConfig, today: string): CatalogFlag | null {
-    if (song.addedAt && song.addedAt > mode.startDate && isRecent(song.addedAt, today)) {
-        return 'new';
-    }
-    if (isRecent(song.updatedAt, today)) return 'updated';
-    return null;
-}
-
-/** The date a flag refers to, for sorting and for the "N days ago" label. */
-export function flagDate(song: Song, flag: CatalogFlag): string | undefined {
-    return flag === 'new' ? song.addedAt : song.updatedAt;
+export function isNewTrack(song: Song, mode: ModeConfig, today: string): boolean {
+    return !!song.addedAt && song.addedAt > mode.startDate && isRecent(song.addedAt, today);
 }
 
 export function describeAge(date: string, today: string): string {
@@ -53,16 +40,6 @@ export function describeAge(date: string, today: string): string {
     if (days <= 0) return 'today';
     if (days === 1) return 'yesterday';
     return `${days} days ago`;
-}
-
-/**
- * The most recent thing that happened to a track, for the "Updated" ordering.
- * Sorts on both stamps rather than just `addedAt`, or a retitle (half the
- * point of the changelist) would never move a track up the list.
- */
-export function lastTouched(song: Song): string {
-    const dates = [song.addedAt, song.updatedAt].filter(Boolean) as string[];
-    return dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : '';
 }
 
 /**
@@ -101,14 +78,6 @@ export function albumReleaseKeys(songs: Song[]): Map<string, string> {
         if (!existing || key < existing) keys.set(song.album, key);
     }
     return keys;
-}
-
-/** What actually changed, for the line under an `updated` track. */
-export function describeChange(song: Song): string | null {
-    const parts: string[] = [];
-    if (song.previousTitle) parts.push(`was “${song.previousTitle}”`);
-    if (song.previousAlbum) parts.push(`moved from ${song.previousAlbum}`);
-    return parts.length ? parts.join(' · ') : null;
 }
 
 /**
