@@ -489,17 +489,28 @@ async function scanSongs() {
                 };
 
                 const slug = albumSlug(albumName);
-                await extractArt(fullPath, albumName, metadata);
+                // extractArt returns null on a master with no embedded picture, which
+                // is real on this catalog (leaks and demos aren't always tagged with
+                // art). The manifest entry has to track that: writing `file` from the
+                // slug unconditionally, whether or not extraction produced anything,
+                // shipped two dead art URLs to players (see the 404s on
+                // /challenger/art/*version-2*.webp). AlbumArt.svelte already falls
+                // back to a placeholder when `file` is missing, so omitting it here is
+                // the fix, not a workaround
+                const artPath = await extractArt(fullPath, albumName, metadata);
 
                 if (!albumsMap.has(slug)) {
                     albumsMap.set(slug, {
                         name: albumName,
-                        file: `${slug}.webp`,
+                        file: artPath ? `${slug}.webp` : undefined,
                         isSingle: true,
                     });
                 } else {
-                    let album = albumsMap.get(slug);
+                    const album = albumsMap.get(slug);
                     album.isSingle = false;
+                    // Backfill from a later track in the same album that does have
+                    // art, rather than let the first untagged track's miss stick
+                    if (artPath && !album.file) album.file = `${slug}.webp`;
                     albumsMap.set(slug, album);
                 }
 

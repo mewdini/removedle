@@ -60,7 +60,9 @@ export interface RoundInfo {
 
 export interface AlbumArt {
     name: string;
-    file: string;
+    // Absent when the master had no embedded art to extract; AlbumArt.svelte
+    // already falls back to a placeholder for that case
+    file?: string;
     isSingle: boolean;
 }
 
