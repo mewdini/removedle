@@ -143,6 +143,13 @@
          It stays full-bleed; unlike the maskable icons below, iOS crops gently
          and doesn't need the 80% safe zone. -->
     <link rel="apple-touch-icon" sizes="180x180" href={appleTouchIcon} />
+    <!-- This tag alone didn't stop the 404s: plenty of clients (bots, link
+         unfurlers, some older iOS builds) fetch /apple-touch-icon.png and
+         /apple-touch-icon-precomposed.png at the site root by convention
+         instead of parsing the page for a <link>. static/apple-touch-icon.png
+         and static/apple-touch-icon-precomposed.png are byte-identical copies
+         of this same file, serving that convention directly, the same way
+         static/favicon.ico backs the bare favicon request above -->
     <link rel="icon" type="image/png" sizes="192x192" href={favicon192} />
     <link rel="icon" type="image/png" sizes="512x512" href={favicon512} />
     <!-- Root-relative and hardcoded rather than resolve()d: resolve() returns
