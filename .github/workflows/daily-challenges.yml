@@ -9,14 +9,21 @@ on:
         # 21:00 Pacific (the site rolls over at 9pm PT -- see getGameDate; that is
         # 04:00-05:00 UTC depending on DST).
         #
-        # The hour matters now that the target date comes from the game clock
-        # (scripts/next-game-date.js = gameDate() + 1). That is only correct if the
-        # run lands AFTER the reset for the day it is generating, otherwise +1
-        # would name a day that is already live. 06:09 UTC is 23:09 PT in PDT and
-        # 22:09 PT in PST, i.e. 129 and 69 minutes past the reset -- and since
-        # Actions only ever delays a run, never fires one early, a delay pushes it
-        # further into the safe window rather than out of it. The challenge still
-        # lands in R2 ~22 hours before players reach it.
+        # The hour matters because the buffer's start date comes from the game
+        # clock (scripts/generate-week.js = gameDate() + 1 .. +7). That is only
+        # correct if the run lands AFTER the reset for the day it starts from,
+        # otherwise +1 would name a day that is already live. 06:09 UTC is 23:09
+        # PT in PDT and 22:09 PT in PST, i.e. 129 and 69 minutes past the reset,
+        # and since Actions only ever delays a run, never fires one early, a delay
+        # pushes it further into the safe window rather than out of it.
+        #
+        # Every run tops up a rolling 7-day buffer rather than generating exactly
+        # one day. scripts/generate-week.js skips any of the next 7 days that
+        # already has a challenge in R2, and retries what's missing. One bad run
+        # only costs a day of buffer, not the whole week, and a sustained outage
+        # gets up to 7 daily attempts to clear before a player would ever see a
+        # missing challenge. scripts/challenge-health.js re-verifies the buffer
+        # from R2 afterward and is what actually tracks and alerts on gaps
         #
         # The same run also does a full streaming-link liveness sweep, folded in
         # from the old standalone verify-links cron: one schedule we know fires
@@ -99,43 +106,31 @@ jobs:
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
-            - name: Generate Snippets
+            # scripts/generate-week.js does both modes itself and pushes each date
+            # immediately after generating it. Required, not optional: generate-daily's
+            # "last N days" dedup reads the challenges bucket over the S3 API, so a
+            # later date in the same run cannot see an earlier one's picks until it's
+            # pushed. A generate+push failure for one date is retried a couple of
+            # times before moving on, without aborting the rest of the run, and
+            # what's still missing after retries is left for tomorrow's cron, the
+            # rolling buffer's actual retry mechanism, rather than blocking here.
+            #
+            # Explicit workflow_dispatch inputs behave exactly as before, one date
+            # or an inclusive range, always regenerated. The scheduled run with no
+            # inputs is the new default: top up the next 7 days, skipping whatever
+            # already exists
+            - name: Generate challenges (rolling 7-day buffer)
               run: |
                   START_DATE="${{ github.event.inputs.start_date }}"
                   END_DATE="${{ github.event.inputs.end_date }}"
                   TARGET_DATE="${{ github.event.inputs.target_date }}"
 
-                  # A plain record of the dates this run generated (handy in the run
-                  # log for a range backfill); the link sweep below verifies the whole
-                  # catalog, so nothing consumes this file anymore.
-                  : > generated-dates.txt
-
-                  # Every mode gets its own challenge for the same date.
-                  generate_all() {
-                      node scripts/generate-daily.js "$1"
-                      node scripts/generate-daily.js --mode=challenger "$1"
-                  }
-
                   if [ -n "$START_DATE" ] && [ -n "$END_DATE" ]; then
-                      echo "Generating range: $START_DATE to $END_DATE"
-                      CURRENT="$START_DATE"
-                      while [[ "$CURRENT" < "$END_DATE" || "$CURRENT" == "$END_DATE" ]]; do
-                          echo "Processing $CURRENT..."
-                          generate_all "$CURRENT"
-                          echo "$CURRENT" >> generated-dates.txt
-                          CURRENT=$(date -I -d "$CURRENT + 1 day")
-                      done
+                      node scripts/generate-week.js --start="$START_DATE" --end="$END_DATE"
+                  elif [ -n "$TARGET_DATE" ]; then
+                      node scripts/generate-week.js --target="$TARGET_DATE"
                   else
-                      if [ -z "$TARGET_DATE" ]; then
-                          # From the game clock, not the runner's UTC date: the
-                          # runner is UTC and the game rolls over at 21:00 PT, so
-                          # `date -d tomorrow` only agreed with this by virtue of
-                          # where the cron happened to sit.
-                          TARGET_DATE=$(node scripts/next-game-date.js)
-                      fi
-                      echo "Generating for date: $TARGET_DATE"
-                      generate_all "$TARGET_DATE"
-                      echo "$TARGET_DATE" >> generated-dates.txt
+                      node scripts/generate-week.js
                   fi
               env:
                   # No MASTERS_DIR/DATA_DIR/OUTPUT_DIR here: they already equal the
@@ -146,17 +141,29 @@ jobs:
                   #
                   # Needed since the challenges bucket went private: the generator
                   # reads the previous days' meta.json over the S3 API to avoid
-                  # repeating songs. Without these it throws instead of silently
-                  # producing a challenge with no de-duplication.
+                  # repeating songs, and generate-week.js pushes each date's
+                  # output. Without these it throws instead of silently producing
+                  # a challenge with no de-duplication
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
-            # Publish the audio first, so tomorrow's challenge is live no matter what
-            # the link pass does next. Audio (challenges bucket) and links (data
-            # bucket) are independent, so nothing about the challenge depends on the
-            # verify below -- putting it first means a slow or failing link sweep can
-            # never delay or block the audio.
+            # Flags a data problem as early as possible, separately from the
+            # buffer/retry system and the challenge-health issue further down
+            # if: always(), since this must still run even if the Generate step
+            # above exited non-zero, which happens when every attempted
+            # generation failed
+            - name: Flag likely-permanent generation failures
+              if: always()
+              run: node scripts/flag-permanent-failures.js
+
+            # A second, redundant push of whatever this run generated. Cheap,
+            # since out/dailies holds only this run's output and nothing older
+            # (it is not cached between runs), and idempotent, so it costs
+            # nothing on the common path where generate-week.js's own per-date
+            # pushes already landed everything. Catches the edge case where a
+            # date's audio push succeeded but something after it in the same
+            # retry attempt did not
             - name: Push Snippets to R2
               run: |
                   node scripts/sync-r2.js push-challenges
@@ -165,6 +172,212 @@ jobs:
                   R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
                   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
                   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Independent re-verification of the buffer from R2, not generate-week.js's
+            # own report. This is what actually decides whether to alert, and it would
+            # miss a problem that only shows up in the bucket, like a partial upload or
+            # a catalog change that orphaned a songId, if it just trusted that script's
+            # log. continue-on-error, since a healthcheck failure must never block a run
+            # that already published a challenge.
+            - name: Check challenge health
+              id: challenge_health
+              continue-on-error: true
+              run: node scripts/challenge-health.js --json > challenge-health-report.json
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Only when tomorrow itself is the problem
+            # The generate step already gave every date its 3 attempts, but tomorrow
+            # is the one date with no runway left, so it's worth spending one more
+            # full 3-attempt pass on it specifically, rather than waiting for a cron
+            # run that would land after tomorrow is already live
+            # --target regenerates both modes for that date even if only one was
+            # broken; that's safe and cheap
+            # a day this far out is never "in play" yet, and generation is
+            # deterministic, so redoing an already-healthy mode's day just
+            # reproduces the same output
+            - name: Retry urgent challenge gap
+              if: steps.challenge_health.outcome == 'failure'
+              continue-on-error: true
+              run: |
+                  TOMORROW=$(node -e "console.log(JSON.parse(require('fs').readFileSync('challenge-health-report.json','utf8')).tomorrow)")
+                  node scripts/generate-week.js --target="$TOMORROW"
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Re-verifies from R2 after the retry, same as the first check
+            # Only runs when the first check failed, so this is skipped entirely on
+            # the common healthy path
+            # Its report overwrites challenge-health-report.json, which is what the
+            # flag and issue-filing steps below actually read, so a same-run
+            # self-heal is reflected everywhere downstream instead of only in this
+            # step's own log
+            - name: Re-check challenge health
+              id: challenge_health_recheck
+              if: steps.challenge_health.outcome == 'failure'
+              continue-on-error: true
+              run: node scripts/challenge-health.js --json > challenge-health-report.json
+              env:
+                  R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+                  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+                  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+            # Tomorrow's challenge still missing or broken after the retry above
+            # means the buffer is genuinely exhausted for at least one mode, not
+            # just a blip the retry could absorb
+            # Unlike a gap further out in the window, there is no runway left to
+            # self-heal before a player hits it, so this gets an ::error annotation
+            # rather than the ::warning the link sweep below uses: it is the one
+            # failure mode that can actually break the game for a real player
+            # tomorrow
+            # Checks the RECHECK's outcome, not the first check's, since a step that
+            # never ran (the common healthy path) reports 'skipped', which correctly
+            # never matches 'failure'
+            - name: Flag urgent challenge gap
+              if: steps.challenge_health_recheck.outcome == 'failure'
+              run: |
+                  echo "::error title=Challenge buffer exhausted::Tomorrow's challenge is still missing or malformed for at least one mode after a retry, with no buffer days left to cover it. See the Check challenge health and Retry urgent challenge gap step logs."
+                  {
+                      echo "### Challenge buffer exhausted"
+                      echo ""
+                      echo "Tomorrow's challenge is still missing or malformed for at least one mode after an immediate retry. See the *Check challenge health* and *Retry urgent challenge gap* step logs, and the challenge-health issue, for details."
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+            # Maintains ONE rolling "challenge-health" issue, same shape as
+            # link-health below: update while any of the next 7 days is missing or
+            # malformed for either mode, auto-close when the whole buffer is healthy
+            # again. Wrapped so a filing failure degrades to a warning rather than
+            # failing a run that already published a challenge.
+            - name: File challenge-health issue
+              continue-on-error: true
+              uses: actions/github-script@v9
+              with:
+                  script: |
+                      const fs = require('fs');
+                      try {
+                          const { today, tomorrow, modes } = JSON.parse(fs.readFileSync('challenge-health-report.json', 'utf8'));
+                          const LABEL = 'challenge-health';
+                          const TITLE = 'Challenge buffer needs attention';
+                          const STATE_MARKER = /<!-- challenge-health-state: ([\s\S]*?) -->/;
+
+                          const open = (await github.rest.issues.listForRepo({
+                              ...context.repo, labels: LABEL, state: 'open',
+                          })).data[0];
+
+                          let previousState = {};
+                          const stateMatch = open?.body?.match(STATE_MARKER);
+                          if (stateMatch) {
+                              try { previousState = JSON.parse(stateMatch[1]); } catch {}
+                          }
+
+                          const problems = Object.entries(modes).flatMap(([id, m]) =>
+                              m.days.filter((d) => d.status !== 'ok').map((d) => ({ mode: id, ...d }))
+                          );
+
+                          // Actual error text for a problem this run also tried to fix, for
+                          // extra detail alongside the health check's own shorter reason
+                          let generationErrors = {};
+                          try {
+                              const generationResults = JSON.parse(fs.readFileSync('generation-report.json', 'utf8'));
+                              for (const r of generationResults) {
+                                  if (r.status === 'failed') generationErrors[`${r.mode}:${r.date}`] = r.error;
+                              }
+                          } catch {
+                              // Missing on a manual dispatch that never ran generation
+                              // Treat as none, not an error
+                          }
+
+                          function daysBetween(from, to) {
+                              return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+                          }
+
+                          // Whether a problem is the SAME one already open on an earlier run,
+                          // not just repeated inside this run's own retries
+                          // A sustained platform outage can produce identical errors across a
+                          // few retries in 20 seconds and still clear before the next scheduled run
+                          // Surviving a full day-to-day cycle of automatic retry is a much
+                          // stronger sign that regenerating alone will not fix it
+                          const nextState = {};
+                          const persisting = [];
+
+                          for (const p of problems) {
+                              const key = `${p.mode}:${p.date}`;
+                              const signature = `${p.status}:${(p.reason || '').slice(0, 200)}`;
+                              const previous = previousState[key];
+                              const firstSeen = previous?.signature === signature ? previous.firstSeen : today;
+                              nextState[key] = { firstSeen, signature };
+
+                              const days = daysBetween(firstSeen, today);
+                              if (days >= 1) persisting.push({ ...p, days, error: generationErrors[key] });
+                          }
+
+                          for (const p of persisting) {
+                              const detail = (p.error || p.reason || p.status).replace(/\n/g, ' ').slice(0, 200);
+                              console.log(`::error title=Persisting challenge gap::${p.mode} ${p.date} has been broken for ${p.days}+ day(s): ${detail}`);
+                          }
+
+                          if (problems.length === 0) {
+                              if (open) {
+                                  await github.rest.issues.createComment({
+                                      ...context.repo, issue_number: open.number,
+                                      body: 'Challenge buffer fully healthy again, closing.',
+                                  });
+                                  await github.rest.issues.update({
+                                      ...context.repo, issue_number: open.number, state: 'closed',
+                                  });
+                              }
+                              return;
+                          }
+
+                          let body = 'Maintained automatically by `daily-challenges.yml` (rewritten each run).\n\n';
+
+                          if (persisting.length) {
+                              body += '### Persisting across multiple runs, likely needs a human\n\n';
+                              body += 'Still broken after at least one full day of automatic retry, so regenerating alone has not fixed it and probably will not.\n\n';
+                              body += '| Mode | Date | Days | Detail |\n|---|---|---|---|\n';
+                              for (const p of persisting) {
+                                  const urgent = p.date === tomorrow ? ' **(no buffer left)**' : '';
+                                  const detail = (p.error || p.reason || p.status).replace(/\n/g, ' ').slice(0, 200).replace(/\|/g, '\\|');
+                                  body += `| ${p.mode} | ${p.date}${urgent} | ${p.days}+ | \`${detail}\` |\n`;
+                              }
+                              body += '\n';
+                          }
+
+                          const fresh = problems.filter((p) => !persisting.some((x) => x.mode === p.mode && x.date === p.date));
+                          if (fresh.length) {
+                              body += '### Buffer gaps\n\n';
+                              body += '| Mode | Date | Status | Detail |\n|---|---|---|---|\n';
+                              for (const p of fresh) {
+                                  const urgent = p.date === tomorrow ? ' **(no buffer left)**' : '';
+                                  body += `| ${p.mode} | ${p.date}${urgent} | ${p.status} | ${p.reason || ''} |\n`;
+                              }
+                              body += '\nEach date is retried automatically on tomorrow\'s scheduled run.\n\n';
+                          }
+
+                          body += 'To fix by hand: `node scripts/generate-week.js --target=<date>`, then verify with `node scripts/challenge-health.js`.\n\n';
+                          body += `<!-- challenge-health-state: ${JSON.stringify(nextState).replace(/-->/g, '..')} -->`;
+
+                          try {
+                              await github.rest.issues.getLabel({ ...context.repo, name: LABEL });
+                          } catch {
+                              await github.rest.issues.createLabel({ ...context.repo, name: LABEL, color: 'd73a4a' });
+                          }
+
+                          if (open) {
+                              await github.rest.issues.update({ ...context.repo, issue_number: open.number, title: TITLE, body });
+                          } else {
+                              await github.rest.issues.create({ ...context.repo, title: TITLE, body, labels: [LABEL] });
+                          }
+                      } catch (e) {
+                          core.warning(`challenge-health issue update failed (challenges were still checked): ${e.message}`);
+                          await core.summary
+                              .addRaw(`### challenge-health issue update failed\n\nThe health check still ran; only the notification failed.\n\n\`${e.message}\`\n`)
+                              .write();
+                      }
 
             # Full liveness pass over EVERY streaming link, folded in from the old
             # standalone verify-links cron. HEAD-check each link, heal a dead one
