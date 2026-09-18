@@ -229,6 +229,18 @@ async function walkFiles(dir) {
 // walk into and re-upload at the wrong keys.
 export async function syncPush(localDir, bucket, prefix = '', { excludeDirs = [] } = {}) {
     const root = path.resolve(localDir);
+
+    // A caller with nothing to push (a rolling-buffer run that generated
+    // nothing because everything already existed) never creates this
+    // directory at all, which is the common, healthy case once a buffer is
+    // warm, not an error condition
+    try {
+        await fs.access(root);
+    } catch {
+        console.log(`Nothing to push: ${root} does not exist`);
+        return;
+    }
+
     console.log(`Pushing ${root} to s3://${bucket}/${prefix}...`);
 
     const files = [];
