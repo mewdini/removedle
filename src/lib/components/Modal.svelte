@@ -17,14 +17,27 @@
 {#if revealed}
     <div
         transition:fly={{ y: 10, duration: 250 }}
-        class="animate-fade-in animate fixed inset-0 z-50 flex items-center justify-center bg-black/65"
+        class="animate-fade-in animate fixed inset-0 z-50 flex h-dvh items-center justify-center bg-black/65"
     >
-        <!-- flex-col + max-h-[90vh], scrolling only the inner body below, not
+        <!-- flex-col + max-h-[90dvh], scrolling only the inner body below, not
              this box: the close button lives out here so it can never scroll
              out of reach on a viewport short enough that the body needs to
-             scroll (the catalog on a short phone screen, mainly) -->
+             scroll (the catalog on a short phone screen, mainly).
+
+             dvh, not vh: plain vh on mobile Safari sizes against the large
+             viewport, as if the address bar were already collapsed, not the
+             viewport actually visible while it's showing. inset-0 on this
+             fixed overlay stretches to that same oversized box, so a modal
+             centered and capped at 90vh could still render taller than
+             what's on screen, with the close button landing above the
+             visible area: reported as "cut off" on an iPhone 14. Chrome on
+             iOS doesn't share the discrepancy, which is why the bug never
+             reproduced there. dvh tracks the real, current visible viewport
+             as the address bar shows and hides, so both the overlay (h-dvh)
+             and the box's cap need it: fixing only one still centers the
+             box inside an oversized outer container -->
         <div
-            class="animate-fly-fade-in relative mx-3 flex max-h-[90vh] w-full flex-col rounded-lg border-2 border-theme-text bg-theme-bg sm:mx-0 {maxWidth}"
+            class="animate-fly-fade-in relative mx-3 flex max-h-[90dvh] w-full flex-col rounded-lg border-2 border-theme-text bg-theme-bg sm:mx-0 {maxWidth}"
             style="box-shadow: 0 0 20px rgba(0,0,0,0.5);"
         >
             <button
@@ -49,7 +62,7 @@
             </button>
             <!-- min-h-0 overrides flexbox's default min-height:auto, which
                  would otherwise let this child grow past the parent's
-                 max-h-[90vh] instead of scrolling -->
+                 max-h-[90dvh] instead of scrolling -->
             <div class="min-h-0 overflow-y-auto {bodyClass}">
                 {@render children()}
             </div>
