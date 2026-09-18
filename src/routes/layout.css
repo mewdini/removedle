@@ -9,14 +9,27 @@
    and never substitutes. Verified against the binary, not just on screen.
 
    The practical rule: never put this on anything but the site name. Applied to
-   'Day #5' or a date, the digits would silently disappear. font-display: swap
-   keeps the title readable in Poppins while the 57 KB file loads. */
+   'Day #5' or a date, the digits would silently disappear.
+
+   font-display: block, not swap and not optional. swap guarantees the
+   fallback paints first and Royal2 swaps in whenever it arrives, which is a
+   visible flash on every load even with the font preloaded in
+   +layout.svelte, since swap's block period is near zero by design.
+   optional was tried and reverted: its swap period is zero, so once the
+   browser decides the font was not ready in its own ~100ms window it commits
+   to the fallback for the rest of that view and never corrects, even if the
+   font finishes loading moments later, and that decision turned out to be
+   far flakier in practice than the nominal window suggests, dropping Royal2
+   often even on a fast connection. block keeps a longer (~3s) window during
+   which the wordmark is briefly invisible rather than visibly wrong, and
+   unlike optional it keeps an infinite swap period, so a miss still
+   self-corrects instead of giving up for the rest of the view */
 @font-face {
     font-family: 'Royal2';
     src: url('../lib/assets/fonts/Royal2.woff') format('woff');
     font-weight: normal;
     font-style: normal;
-    font-display: swap;
+    font-display: block;
 }
 
 @theme {
