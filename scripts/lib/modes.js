@@ -97,6 +97,7 @@ export const MODES = {
             'adfgdfgaf',
             'elitank',
             'agr1a', // "chews": surfaced via the playlist, now carries 4 catalog tracks
+            'august162007', // corroborated on "beggin on your knees" and "claws" remix
         ],
         // Curated SoundCloud PLAYLISTS of this artist's unreleased material.
         // Swept exactly like archiveAccounts and held to the same guards, but
