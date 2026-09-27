@@ -1,4 +1,5 @@
 import type { ParamMatcher } from '@sveltejs/kit';
+import { RESET_HOUR_PT, addDays, gameDate, pacificParts } from '$lib/shared/game-core';
 
 export const match: ParamMatcher = (param) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(param)) return false;
@@ -9,52 +10,11 @@ export const match: ParamMatcher = (param) => {
     return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 };
 
-// The hour, on a Pacific clock, at which the game rolls over to the next day.
-// This is the ONE number that defines the boundary; everything else here derives
-// from it. Duplicated in scripts/lib/dates.js for the pipeline; keep them equal
-export const RESET_HOUR_PT = 21;
-
-const PACIFIC = 'America/Los_Angeles';
-
-// hourCycle: 'h23' is load-bearing. With `hour12: false` some ICU builds render
-// midnight as "24", which would push the hour over RESET_HOUR_PT and roll the day
-// a second time in the first hour after Pacific midnight
-const PACIFIC_PARTS = new Intl.DateTimeFormat('en-CA', {
-    timeZone: PACIFIC,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-});
-
-// The Pacific wall clock at `now`, as a calendar date plus a time of day. Both
-// halves come from a SINGLE format call, so they always describe the same instant
-// on the same side of a DST transition
-function pacificParts(now: Date) {
-    const parts: Record<string, string> = {};
-    for (const part of PACIFIC_PARTS.formatToParts(now)) {
-        if (part.type !== 'literal') parts[part.type] = part.value;
-    }
-
-    return {
-        date: `${parts.year}-${parts.month}-${parts.day}`,
-        hour: Number(parts.hour),
-        minute: Number(parts.minute),
-        second: Number(parts.second),
-    };
-}
-
-// Shift a YYYY-MM-DD string by whole days. Pinned to UTC midnight purely to do
-// the arithmetic on clean date strings: no wall clock is involved, so there is no
-// DST transition for it to step over
-export function addDays(date: string, days: number): string {
-    const d = new Date(`${date}T00:00:00Z`);
-    d.setUTCDate(d.getUTCDate() + days);
-    return d.toISOString().slice(0, 10);
-}
+// The Pacific reset hour, the Pacific wall-clock read, and the day arithmetic
+// live in $lib/shared/game-core, the one copy scripts/lib/dates.js reads too.
+// RESET_HOUR_PT is the ONE number that defines the boundary; everything else
+// derives from it
+export { RESET_HOUR_PT, addDays };
 
 export function calculateDays(startDate: string, endDate: string) {
     const startPart = startDate.split('T')[0];
@@ -85,8 +45,7 @@ export function calculateDays(startDate: string, endDate: string) {
 // 21:00 PT on D it yields D+1, and at 00:00 PT on D+1 the Pacific date advances
 // to D+1 as the +1 falls away, yielding D+1 again
 export function getGameDate(now: Date = new Date()): string {
-    const { date, hour } = pacificParts(now);
-    return hour >= RESET_HOUR_PT ? addDays(date, 1) : date;
+    return gameDate(now);
 }
 
 // Seconds until the next rollover, for the countdown. Derived from the Pacific
