@@ -34,6 +34,10 @@ const ERROR_LINES: { line: string; song: string }[] = [
     { line: 'Good luck tryna fix me...', song: 'JRJRJR' },
     { line: "It's all your fault...", song: 'kodak moment' },
 ];
+// Jane Remover's birthday, as MM-DD on the Pacific calendar, checked every year
+// On it the tagline reads BIRTHDAY_CAPTION in every mode (see Header.svelte)
+const BIRTHDAY_MONTH_DAY = '09-26';
+const BIRTHDAY_CAPTION = 'Happy Birthday Jane!';
 const NAME = 'removedle';
 const DESCRIPTION =
     'A daily Jane Remover song guessing game featuring five songs and three guesses per track. How many can you get right?';
@@ -131,6 +135,8 @@ export {
     ASSETS_URL,
     CHALLENGES_URL,
     ERROR_LINES,
+    BIRTHDAY_MONTH_DAY,
+    BIRTHDAY_CAPTION,
     NAME,
     ALT_HOST,
     ALT_NAME,

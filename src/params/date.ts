@@ -48,6 +48,17 @@ export function getGameDate(now: Date = new Date()): string {
     return gameDate(now);
 }
 
+// Whether the Pacific CALENDAR date is the given MM-DD, in any year
+//
+// The calendar day on purpose, not getGameDate(), which flips at 21:00 PT and
+// would switch a birthday off three hours before it ends
+// Not the visitor's own clock either: the server renders the same markup, and
+// a local-time check would disagree with it for anyone whose date differs from
+// the server's, which shows up as a flash after hydration
+export function isMonthDay(monthDay: string, now: Date = new Date()): boolean {
+    return pacificParts(now).date.slice(5) === monthDay;
+}
+
 // Seconds until the next rollover, for the countdown. Derived from the Pacific
 // wall clock so it agrees with getGameDate by construction rather than by a
 // second, separately-maintained piece of timezone arithmetic

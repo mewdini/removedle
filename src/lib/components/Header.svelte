@@ -16,6 +16,8 @@
     import { themes } from '$lib/themes';
     import { page } from '$app/state';
     import { MODE_LIST, MODES, modeParam, resolveMode, type ModeConfig } from '$lib/modes';
+    import { BIRTHDAY_CAPTION, BIRTHDAY_MONTH_DAY } from '$lib/statics';
+    import { isMonthDay } from '$params/date';
 
     // The numeric id form, not /shotnochaser -- X redirects it to the current
     // handle, so the link survives a username change
@@ -44,6 +46,9 @@
     }
 
     const currentMode = $derived(resolveMode(page.data.mode));
+    // Read once, so the client's first render matches what the server sent
+    // A page left open past Pacific midnight keeps its caption until the next load
+    const birthday = isMonthDay(BIRTHDAY_MONTH_DAY);
     // Resolved server-side (see loadBlurbLinks) because the quoted track is an
     // official release, so it is not in challenger's own catalog.
     const blurbLinks = $derived(page.data.blurbLinks ?? {});
@@ -116,12 +121,13 @@
              56px is exactly double its own 28px -->
         <span
             class="flex min-h-[33px] flex-col items-center justify-center text-theme-text lg:min-h-[56px] {currentMode.id ===
-            MODES.normal.id
+                MODES.normal.id || birthday
                 ? 'text-lg'
                 : 'text-xs lg:text-lg'}"
         >
-            {currentMode.blurb}
-            {#if currentMode.blurbSong}
+            {birthday ? BIRTHDAY_CAPTION : currentMode.blurb}
+            <!-- The citation belongs to the blurb, so it goes with it -->
+            {#if currentMode.blurbSong && !birthday}
                 <span class="group inline-block align-middle text-xs text-theme-muted italic">
                     {#if hasBlurbLinks}
                         <button
