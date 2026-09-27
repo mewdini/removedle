@@ -19,13 +19,9 @@
 import { BUCKETS, readObject, listObjects } from './lib/r2.js';
 import { MODES } from './lib/modes.js';
 import { addDays, gameDate } from './lib/dates.js';
+import { GUESSES_PER_ROUND, MAX_ROUNDS } from '../src/lib/shared/game-core.js';
 
 const BUFFER_DAYS = 7;
-// Duplicated from src/lib/statics.ts, same reason scripts/lib/dates.js
-// duplicates the reset hour: that file is TypeScript behind SvelteKit's
-// $params alias and pulls in @sveltejs/kit types
-const MAX_ROUNDS = 5;
-const GUESSES_PER_ROUND = 3;
 const ASSETS_URL = process.env.ASSETS_URL || 'https://assets.removedle.org';
 
 const JSON_OUT = process.argv.includes('--json');

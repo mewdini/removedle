@@ -1,7 +1,8 @@
 import { dev } from '$app/environment';
+// The round and guess counts are shared with the pipeline (generate-daily,
+// challenge-health), so they live in the plain-JS core both sides can import
+import { MAX_ROUNDS, GUESSES_PER_ROUND } from './shared/game-core';
 
-const MAX_ROUNDS = 5;
-const GUESSES_PER_ROUND = 3;
 // Shared by AudioCard (caps the fuzzy-search results it keeps) and
 // SearchResults (sizes its reserved dropdown space to that same worst case)
 const MAX_SEARCH_RESULTS = 5;

@@ -1,4 +1,6 @@
 import { ASSETS_URL, CHALLENGES_URL } from '$lib/statics';
+import { MODE_CORE, snippetFileName } from '$lib/shared/game-core';
+import type { ModeId } from '$lib/shared/game-core';
 
 // Game modes. Each one is a completely separate game: its own catalog, its own
 // daily challenges, its own community stats and its own saved progress.
@@ -7,11 +9,11 @@ import { ASSETS_URL, CHALLENGES_URL } from '$lib/statics';
 // segment, so its links, R2 keys, localStorage keys and PRNG seed are exactly
 // what they always were. The header toggle is just navigation.
 //
-// Keep this in sync with scripts/lib/modes.js, which is the pipeline-side copy
-// (they cannot import each other: this one pulls in $app/environment via
-// statics, that one pulls in node:path).
+// id, label, segment, prefix and startDate come from $lib/shared/game-core, the
+// one copy scripts/lib/modes.js reads as well. Only what the app alone needs is
+// written out here.
 
-export type ModeId = 'normal' | 'challenger';
+export type { ModeId };
 
 export interface ModeConfig {
     id: ModeId;
@@ -46,23 +48,15 @@ export interface ModeConfig {
 
 export const MODES: Record<ModeId, ModeConfig> = {
     normal: {
-        id: 'normal',
-        label: 'Normal',
-        segment: '',
-        prefix: '',
+        ...MODE_CORE.normal,
         storagePrefix: '',
-        startDate: '2026-07-24',
         shareLabel: 'removedle',
         primaryArtist: 'Jane Remover',
         blurb: 'Guess the Jane Remover songs daily!',
     },
     challenger: {
-        id: 'challenger',
-        label: 'Challenger',
-        segment: 'challenger',
-        prefix: 'challenger/',
+        ...MODE_CORE.challenger,
         storagePrefix: 'challenger-',
-        startDate: '2026-07-24',
         shareLabel: 'removedle challenger',
         primaryArtist: 'Jane Remover',
         blurb: "That challenger, who's already come this far, is going to face their final opponent!",
@@ -89,7 +83,7 @@ export const artUrl = (mode: ModeConfig, file: string) => `${ASSETS_URL}/${mode.
 export const metaUrl = (mode: ModeConfig, date: string) =>
     `${CHALLENGES_URL}/${mode.prefix}${date}/meta.json`;
 export const snippetUrl = (mode: ModeConfig, date: string, round: number, guess: number) =>
-    `${CHALLENGES_URL}/${mode.prefix}${date}/round-${round}-guess-${guess}.opus`;
+    `${CHALLENGES_URL}/${mode.prefix}${date}/${snippetFileName(round, guess)}`;
 
 // Same-origin proxy for a mode's catalog, used by the catalog browser to show a
 // mode other than the one being played (see src/routes/catalog/[[mode=mode]]).

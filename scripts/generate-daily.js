@@ -6,6 +6,7 @@ import { runFfmpeg } from './lib/ffmpeg.js';
 import { BUCKETS, readObject } from './lib/r2.js';
 import { modeDirs, parseMode } from './lib/modes.js';
 import { gameDate } from './lib/dates.js';
+import { snippetFileName } from '../src/lib/shared/game-core.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -327,7 +328,7 @@ async function generateDaily() {
             console.log(`Round ${round}: ${song.title}`);
 
             for (const snip of snippets) {
-                const outputName = `round-${round}-guess-${snip.id}.opus`;
+                const outputName = snippetFileName(round, snip.id);
                 const outputPath = path.join(dayDir, outputName);
 
                 try {

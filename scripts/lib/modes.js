@@ -1,5 +1,6 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { MODE_CORE } from '../../src/lib/shared/game-core.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
@@ -11,15 +12,15 @@ const ROOT = path.resolve(__dirname, '../..');
 // ones: no key prefix, no storage prefix, no seed prefix, and the same on-disk
 // paths it has always used. That is what keeps already-published R2 keys, already
 // generated challenges and live players' data byte-for-byte unchanged
+//
+// id, label, segment, prefix and startDate come from src/lib/shared/game-core.js,
+// the one copy the app also reads. `prefix` is the R2 key prefix with trailing
+// slash, '' meaning "at the bucket root". Everything below is pipeline-only
 export const MODES = {
     normal: {
-        id: 'normal',
-        label: 'Normal',
-        // R2 key prefix, with trailing slash. '' means "at the bucket root"
-        prefix: '',
+        ...MODE_CORE.normal,
         // Sub-directory of masters/ holding this mode's source audio
         srcDir: '',
-        startDate: '2026-07-24',
         // Mixed into the daily PRNG seed. MUST stay '' for normal: changing it
         // re-rolls every past and future day's song selection
         seedPrefix: '',
@@ -31,11 +32,8 @@ export const MODES = {
         singlesAsOwnAlbum: false,
     },
     challenger: {
-        id: 'challenger',
-        label: 'Challenger',
-        prefix: 'challenger/',
+        ...MODE_CORE.challenger,
         srcDir: 'challenger',
-        startDate: '2026-07-24',
         seedPrefix: 'challenger:',
         linkPolicy: 'strict',
         singlesAsOwnAlbum: true,
