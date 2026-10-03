@@ -24,7 +24,16 @@ export const load: LayoutServerLoad = async ({ fetch, route, params, locals, coo
             ? null
             : ERROR_LINES[Math.floor(Math.random() * ERROR_LINES.length)];
         const errorSong = chosen ? songList.find((s: Song) => s.title === chosen.song) : undefined;
-        const blurbLinks = await loadBlurbLinks(fetch, mode, songList);
+        // Picked here rather than in the component, so the SSR'd tagline and
+        // the hydrated one agree
+        // Re-rolls on a mode switch, since that is when this load re-runs
+        const blurbIndex = Math.floor(Math.random() * mode.blurbs.length);
+        const blurbLinks = await loadBlurbLinks(
+            fetch,
+            mode,
+            songList,
+            mode.blurbs[blurbIndex].song
+        );
 
         // A cookie value the player never wrote, or one written before a theme
         // was renamed or removed, is not a real theme name
@@ -48,6 +57,7 @@ export const load: LayoutServerLoad = async ({ fetch, route, params, locals, coo
             theme,
             songList,
             albums,
+            blurbIndex,
             blurbLinks,
             errorLine: chosen && {
                 line: chosen.line,

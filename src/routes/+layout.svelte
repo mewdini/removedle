@@ -34,11 +34,12 @@
     // so the alias is consistent rather than only skin-deep on the wordmark.
     const name = $derived(siteName(!!page.data.viaAlias));
     const pageTitle = $derived(mode.id === MODES.normal.id ? name : `${name} · ${mode.label}`);
-    // Both blurbs end in their own punctuation, so a plain space is enough to
-    // keep the two sentences apart in the link previews Discord and Slack build
-    // from this.
+    // Always the mode's first blurb, not the randomly picked one, so a link
+    // preview does not change between unfurls. It ends in its own punctuation,
+    // so a plain space is enough to keep the two sentences apart in the link
+    // previews Discord and Slack build from this.
     const pageDescription = $derived(
-        mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurb} ${DESCRIPTION}`
+        mode.id === MODES.normal.id ? DESCRIPTION : `${mode.blurbs[0].text} ${DESCRIPTION}`
     );
     // The current page, not the mode root, and built from page.url rather than
     // resolve(), which returns paths relative to the current route ('.',

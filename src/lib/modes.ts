@@ -15,6 +15,17 @@ import type { ModeId } from '$lib/shared/game-core';
 
 export type { ModeId };
 
+export interface Blurb {
+    text: string;
+    /**
+     * Track the blurb quotes, cited under the tagline the same way the 404
+     * lines are (see ERROR_LINES in $lib/statics).
+     */
+    song?: string;
+    /** Who said it and where, for a quote that is not a lyric. Cited as a link. */
+    source?: { name: string; url: string };
+}
+
 export interface ModeConfig {
     id: ModeId;
     label: string;
@@ -36,14 +47,12 @@ export interface ModeConfig {
      * only case where the field carries information.
      */
     primaryArtist: string;
-    /** One-line description, used for the tagline and page metadata. */
-    blurb: string;
     /**
-     * Track the blurb quotes, cited under the tagline the same way the 404
-     * lines are (see ERROR_LINES in $lib/statics). Metadata gets the blurb
-     * alone, so the description stays a sentence rather than a citation.
+     * Taglines, one picked at random per load (see +layout.server.ts).
+     * The first is also the page metadata, text alone, so link previews stay
+     * stable and the description stays a sentence rather than a citation.
      */
-    blurbSong?: string;
+    blurbs: readonly [Blurb, ...Blurb[]];
 }
 
 export const MODES: Record<ModeId, ModeConfig> = {
@@ -52,15 +61,26 @@ export const MODES: Record<ModeId, ModeConfig> = {
         storagePrefix: '',
         shareLabel: 'removedle',
         primaryArtist: 'Jane Remover',
-        blurb: 'Guess the Jane Remover songs daily!',
+        blurbs: [{ text: 'Guess the Jane Remover songs daily!' }],
     },
     challenger: {
         ...MODE_CORE.challenger,
         storagePrefix: 'challenger-',
         shareLabel: 'removedle challenger',
         primaryArtist: 'Jane Remover',
-        blurb: "That challenger, who's already come this far, is going to face their final opponent!",
-        blurbSong: 'Professional Vengeance',
+        blurbs: [
+            {
+                text: "That challenger, who's already come this far, is going to face their final opponent!",
+                song: 'Professional Vengeance',
+            },
+            {
+                text: 'I had to run it back on challenge mode',
+                source: {
+                    name: 'Jane Remover',
+                    url: 'https://x.com/janeremover/status/2106278857372553685',
+                },
+            },
+        ],
     },
 };
 

@@ -62,16 +62,17 @@ export async function loadSongCatalog(fetchFn: typeof fetch, mode: ModeConfig): 
 export async function loadBlurbLinks(
     fetchFn: typeof fetch,
     mode: ModeConfig,
-    songList: Song[]
+    songList: Song[],
+    song: string | undefined
 ): Promise<StreamingLinks> {
-    if (!mode.blurbSong) return {};
+    if (!song) return {};
 
-    const local = songList.find((s) => s.title === mode.blurbSong);
+    const local = songList.find((s) => s.title === song);
     if (local) return local.links ?? {};
 
     try {
         const catalog = await loadSongCatalog(fetchFn, MODES.normal);
-        return catalog.find((s) => s.title === mode.blurbSong)?.links ?? {};
+        return catalog.find((s) => s.title === song)?.links ?? {};
     } catch (e) {
         console.warn(`Failed to resolve blurb links for ${mode.id}:`, e);
         return {};

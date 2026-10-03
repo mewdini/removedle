@@ -49,6 +49,9 @@
     // Read once, so the client's first render matches what the server sent
     // A page left open past Pacific midnight keeps its caption until the next load
     const birthday = isMonthDay(BIRTHDAY_MONTH_DAY);
+    // Chosen at random by the layout load
+    // Falls back to the first when there is no load data, or a stale index
+    const blurb = $derived(currentMode.blurbs[page.data.blurbIndex ?? 0] ?? currentMode.blurbs[0]);
     // Resolved server-side (see loadBlurbLinks) because the quoted track is an
     // official release, so it is not in challenger's own catalog.
     const blurbLinks = $derived(page.data.blurbLinks ?? {});
@@ -125,9 +128,19 @@
                 ? 'text-lg'
                 : 'text-xs lg:text-lg'}"
         >
-            {birthday ? BIRTHDAY_CAPTION : currentMode.blurb}
+            {birthday ? BIRTHDAY_CAPTION : blurb.text}
             <!-- The citation belongs to the blurb, so it goes with it -->
-            {#if currentMode.blurbSong && !birthday}
+            {#if blurb.source && !birthday}
+                <!-- An external URL from $lib/modes, which the rule cannot see through -->
+                <!-- eslint-disable svelte/no-navigation-without-resolve -->
+                <a
+                    class="text-xs text-theme-muted italic underline decoration-dotted underline-offset-2"
+                    target="_blank"
+                    rel="noreferrer"
+                    href={blurb.source.url}>{blurb.source.name}</a
+                >
+                <!-- eslint-enable svelte/no-navigation-without-resolve -->
+            {:else if blurb.song && !birthday}
                 <span class="group inline-block align-middle text-xs text-theme-muted italic">
                     {#if hasBlurbLinks}
                         <button
@@ -135,7 +148,7 @@
                             class="cursor-pointer italic underline decoration-dotted underline-offset-2"
                             aria-expanded={blurbToggled}
                             onclick={() => (blurbToggled = !blurbToggled)}
-                            >from “{currentMode.blurbSong}”</button
+                            >from “{blurb.song}”</button
                         >
                         <!-- Expands in flow, same as the 404 citation. Floating it
                              over the header instead would drop the links onto the
@@ -150,7 +163,7 @@
                             <StreamingLinks links={blurbLinks} inGame={false} />
                         </span>
                     {:else}
-                        from “{currentMode.blurbSong}”
+                        from “{blurb.song}”
                     {/if}
                 </span>
             {/if}
